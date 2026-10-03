@@ -133,7 +133,12 @@ Systems expected to scale with unit count should be designed with profiling and 
 
 ## Current development phase
 
-The current target is Prototype 0.1.
+The current target is Prototype 0.3. Prototype 0.2 has been manually accepted and saved.
+Prototype 0.3A establishes state/event replay data; 0.3B adds full server recording.
+Prototype 0.3C adds minimal offline 1x playback; its manual acceptance remains pending.
+Further replay work (including seeking), reconnection and match-history features are deferred.
+Preserve the existing results and interfaces; resume only after the user sets a new scope.
+Recording success or automatic playback checks are not manual playback acceptance.
 
 Prototype 0.1 must demonstrate:
 
@@ -147,6 +152,23 @@ Prototype 0.1 must demonstrate:
 8. Replication of the resulting unit state to both clients.
 
 Do not implement advanced combat systems until this networking and movement loop works reliably.
+
+## Replay compatibility
+
+Every major development release (including new Prototype 0.x stages) MUST run replay
+compatibility validation before acceptance. Keep frozen fixtures for each supported
+format version and run their read, validation, round-trip, checkpoint/event-boundary,
+and presentation checks. Do not regenerate old fixtures to make a failing check pass.
+
+Changes to replay structure or field semantics require an explicit format-version
+decision, documented compatibility/migration policy, and a new fixture when needed.
+Unknown format versions must fail clearly; never silently load them as the current version.
+Map/rules identifiers and content fingerprints must be checked before a future player
+loads presentation assets. State/event replay must never depend on input resimulation,
+live connections, local AI, damage calculation, or authoritative spawning.
+
+Report supported/unsupported versions, automatic results, and unverified manual items
+separately. Successful serialization tests are not full replay recording or playback acceptance.
 
 ## Acceptance output contract
 

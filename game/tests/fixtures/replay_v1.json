@@ -1,0 +1,360 @@
+{
+  "header": {
+    "format": "RTTReplay",
+    "format_version": 1,
+    "game_version": "0.3A",
+    "match_id": "fixture-match-v1",
+    "tick_hz": 60,
+    "map_id": "fixture-map-v1",
+    "rules_id": "fixture-rules-v1",
+    "random_seed": "0123456789abcdef",
+    "players": [
+      {
+        "player_id": 1,
+        "label": "Player 1"
+      }
+    ],
+    "content_fingerprints": {
+      "fixture-map": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "initial_state": {
+    "through": {
+      "tick": 0,
+      "sequence": -1
+    },
+    "units": [
+      {
+        "unit_id": 1,
+        "owner_player_id": 1,
+        "owner_peer_id": 42,
+        "team_id": 1,
+        "position": [
+          10,
+          0.5,
+          100
+        ],
+        "yaw": 0.0,
+        "maximum_health": 100.0,
+        "health": 100.0,
+        "unit_type": 1,
+        "armed": true,
+        "definition_id": "fixture/unit-1",
+        "command": {
+          "mode": -1,
+          "target": null,
+          "path": [],
+          "final_yaw": null,
+          "engaging": false
+        }
+      },
+      {
+        "unit_id": 2,
+        "owner_player_id": 0,
+        "owner_peer_id": 0,
+        "team_id": 2,
+        "position": [
+          14,
+          0.5,
+          100
+        ],
+        "yaw": 0.0,
+        "maximum_health": 100.0,
+        "health": 10.0,
+        "unit_type": 0,
+        "armed": false,
+        "definition_id": "fixture/unit-2",
+        "command": {
+          "mode": -1,
+          "target": null,
+          "path": [],
+          "final_yaw": null,
+          "engaging": false
+        }
+      }
+    ],
+    "retired_unit_ids": [],
+    "next_unit_id": 3,
+    "connected_player_ids": [
+      1
+    ]
+  },
+  "records": [
+    {
+      "tick": 1,
+      "sequence": 0,
+      "phase": "commands",
+      "kind": "command",
+      "type": "move",
+      "payload": {
+        "player_id": 1,
+        "peer_id": 42,
+        "unit_ids": [
+          1
+        ],
+        "mode": 1,
+        "target": [
+          16,
+          0,
+          100
+        ],
+        "facing": [
+          1,
+          0,
+          0
+        ],
+        "accepted_ids": [
+          1
+        ],
+        "failed_ids": [],
+        "rejection": "",
+        "group": true
+      }
+    },
+    {
+      "tick": 1,
+      "sequence": 1,
+      "phase": "combat",
+      "kind": "event",
+      "type": "shot",
+      "payload": {
+        "attacker_id": 1,
+        "target_id": 2,
+        "start": [
+          12,
+          0.5,
+          100
+        ],
+        "end": [
+          14,
+          0.5,
+          100
+        ],
+        "health": 0
+      }
+    },
+    {
+      "tick": 1,
+      "sequence": 2,
+      "phase": "combat",
+      "kind": "event",
+      "type": "death",
+      "payload": {
+        "unit_id": 2
+      }
+    },
+    {
+      "tick": 1,
+      "sequence": 3,
+      "phase": "record",
+      "kind": "event",
+      "type": "unit_state",
+      "payload": {
+        "unit_id": 1,
+        "owner_player_id": 1,
+        "owner_peer_id": 42,
+        "team_id": 1,
+        "position": [
+          12,
+          0.5,
+          100
+        ],
+        "yaw": -1.5707963267948966,
+        "maximum_health": 100.0,
+        "health": 100.0,
+        "unit_type": 1,
+        "armed": true,
+        "definition_id": "fixture/unit-1",
+        "command": {
+          "mode": 1,
+          "target": [
+            16,
+            0.5,
+            100
+          ],
+          "path": [
+            [
+              12,
+              0.5,
+              100
+            ],
+            [
+              16,
+              0.5,
+              100
+            ]
+          ],
+          "final_yaw": -1.5707963267948966,
+          "engaging": false
+        }
+      }
+    },
+    {
+      "tick": 2,
+      "sequence": 0,
+      "phase": "commands",
+      "kind": "command",
+      "type": "stop",
+      "payload": {
+        "player_id": 1,
+        "peer_id": 42,
+        "unit_ids": [
+          1
+        ],
+        "mode": -1,
+        "target": null,
+        "facing": null,
+        "accepted_ids": [
+          1
+        ],
+        "failed_ids": [],
+        "rejection": "",
+        "group": true
+      }
+    },
+    {
+      "tick": 2,
+      "sequence": 1,
+      "phase": "combat",
+      "kind": "event",
+      "type": "random_result",
+      "payload": {
+        "key": "reserved-example",
+        "result": {
+          "roll": 0.25
+        },
+        "context": {
+          "unit_id": 1
+        }
+      }
+    },
+    {
+      "tick": 2,
+      "sequence": 2,
+      "phase": "record",
+      "kind": "event",
+      "type": "unit_state",
+      "payload": {
+        "unit_id": 1,
+        "owner_player_id": 1,
+        "owner_peer_id": 42,
+        "team_id": 1,
+        "position": [
+          12,
+          0.5,
+          100
+        ],
+        "yaw": -1.5707963267948966,
+        "maximum_health": 100.0,
+        "health": 100.0,
+        "unit_type": 1,
+        "armed": true,
+        "definition_id": "fixture/unit-1",
+        "command": {
+          "mode": -1,
+          "target": null,
+          "path": [],
+          "final_yaw": null,
+          "engaging": false
+        }
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "through": {
+        "tick": 1,
+        "sequence": 3
+      },
+      "units": [
+        {
+          "unit_id": 1,
+          "owner_player_id": 1,
+          "owner_peer_id": 42,
+          "team_id": 1,
+          "position": [
+            12,
+            0.5,
+            100
+          ],
+          "yaw": -1.5707963267948966,
+          "maximum_health": 100.0,
+          "health": 100.0,
+          "unit_type": 1,
+          "armed": true,
+          "definition_id": "fixture/unit-1",
+          "command": {
+            "mode": 1,
+            "target": [
+              16,
+              0.5,
+              100
+            ],
+            "path": [
+              [
+                12,
+                0.5,
+                100
+              ],
+              [
+                16,
+                0.5,
+                100
+              ]
+            ],
+            "final_yaw": -1.5707963267948966,
+            "engaging": false
+          }
+        }
+      ],
+      "retired_unit_ids": [
+        2
+      ],
+      "next_unit_id": 3,
+      "connected_player_ids": [
+        1
+      ]
+    },
+    {
+      "through": {
+        "tick": 2,
+        "sequence": 2
+      },
+      "units": [
+        {
+          "unit_id": 1,
+          "owner_player_id": 1,
+          "owner_peer_id": 42,
+          "team_id": 1,
+          "position": [
+            12,
+            0.5,
+            100
+          ],
+          "yaw": -1.5707963267948966,
+          "maximum_health": 100.0,
+          "health": 100.0,
+          "unit_type": 1,
+          "armed": true,
+          "definition_id": "fixture/unit-1",
+          "command": {
+            "mode": -1,
+            "target": null,
+            "path": [],
+            "final_yaw": null,
+            "engaging": false
+          }
+        }
+      ],
+      "retired_unit_ids": [
+        2
+      ],
+      "next_unit_id": 3,
+      "connected_player_ids": [
+        1
+      ]
+    }
+  ],
+  "last_tick": 2,
+  "record_count": 7
+}

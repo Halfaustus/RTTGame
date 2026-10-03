@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$GodotPath = 'C:\Dev\Godot\Godot.exe',
-    [ValidateRange(1, 120)][int]$StartupTimeoutSeconds = 30
+    [ValidateRange(1, 120)][int]$StartupTimeoutSeconds = 30,
+    [switch]$RecordReplay,
+    [string]$ReplayOutputPath,
+    [ValidateRange(1, 2147483647)][int]$ReplaySnapshotTicks = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +18,9 @@ $sessionId = [Guid]::NewGuid().ToString('N')
 $logDirectory = Join-Path $sessionRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $sessionId)
 $sessionFile = Join-Path $logDirectory 'session.json'
 $resolvedGodotPath = $null
+$shutdownRequest = Join-Path $logDirectory 'shutdown-request.json'
+$shutdownToken = [Guid]::NewGuid().ToString('N')
+$recordingPath = $null
 
 function Write-JsonFile([string]$Path, $Value) {
     [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
@@ -23,8 +29,10 @@ function Write-JsonFile([string]$Path, $Value) {
 function Save-TestSession {
     $records = @($startedProcesses | ForEach-Object { $_.Record })
     Write-JsonFile $sessionFile ([pscustomobject]@{
-        Version = 2; SessionId = $sessionId; ProjectPath = $gamePath
+        Version = 3; SessionId = $sessionId; ProjectPath = $gamePath
         Status = $sessionStatus; Error = $sessionError; Processes = $records
+        ShutdownRequest = $shutdownRequest; ShutdownToken = $shutdownToken
+        RecordReplay = [bool]$RecordReplay; ReplayOutputPath = $recordingPath; ReplaySnapshotTicks = $ReplaySnapshotTicks
     })
 }
 
@@ -124,9 +132,24 @@ try {
     if ($networkCode -notmatch 'const DEFAULT_PORT:\s*int\s*=\s*(\d+)') { throw 'Cannot read production DEFAULT_PORT.' }
     $port = [int]$Matches[1]
     Assert-PortAvailable $port
+    if ($ReplayOutputPath -and -not $RecordReplay) { throw 'ReplayOutputPath requires -RecordReplay.' }
+    if ($RecordReplay) {
+        $recordingPath = if ($ReplayOutputPath) { [IO.Path]::GetFullPath($ReplayOutputPath) } else { Join-Path $logDirectory 'match.rttreplay.json' }
+        foreach ($candidate in @($recordingPath, "$recordingPath.incomplete", "$recordingPath.publishing", "$recordingPath.status.json")) {
+            if (Test-Path -LiteralPath $candidate) { throw "Replay output/staging exists: $candidate" }
+        }
+    }
     Write-Host "Logs and session: $logDirectory"
-    $server = Start-TestProcess 'server' @('--headless', '--', '--server')
+    $serverArguments = @('--headless', '--', '--server', "--shutdown-request=$shutdownRequest", "--shutdown-token=$shutdownToken")
+    if ($RecordReplay) { $serverArguments += @("--record-replay=$recordingPath", "--replay-snapshot-ticks=$ReplaySnapshotTicks") }
+    $server = Start-TestProcess 'server' $serverArguments
     Wait-TestReady $server "Dedicated server started on port $port."
+    if ($RecordReplay) {
+        $recordingStatusFile = "$recordingPath.status.json"
+        if (-not (Test-Path -LiteralPath $recordingStatusFile) -or ([IO.File]::ReadAllText($recordingStatusFile) | ConvertFrom-Json).status -ne 'recording') {
+            throw "Replay recording failed to start. See $($server.LogPath) and $recordingStatusFile"
+        }
+    }
     foreach ($clientName in @('client-A', 'client-B')) {
         $client = Start-TestProcess $clientName @('--windowed')
         Wait-TestReady $client 'Connected to server. Local peer ID:'

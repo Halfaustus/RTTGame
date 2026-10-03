@@ -14,6 +14,7 @@ var _attack_moves: Dictionary[int, bool] = {}
 var _engaging: Dictionary[int, bool] = {}
 var _reverse_moves: Dictionary[int, bool] = {}
 var _final_yaws: Dictionary[int, float] = {}
+var _move_modes: Dictionary[int, int] = {}
 var _navigation := StaticNavigationGrid.new()
 
 
@@ -38,6 +39,7 @@ func resolve_spawn_position(position: Vector3) -> Variant:
 
 
 func _assign_path(unit_id: int, path: PackedVector3Array, mode: int = MoveMode.BASIC) -> void:
+	_move_modes[unit_id] = mode
 	_attack_moves.erase(unit_id)
 	_engaging.erase(unit_id)
 	_reverse_moves.erase(unit_id)
@@ -221,6 +223,7 @@ func advance(delta: float) -> Dictionary[int, Vector3]:
 
 
 func _clear_move(unit_id: int) -> void:
+	_move_modes.erase(unit_id)
 	_final_yaws.erase(unit_id)
 	_reverse_moves.erase(unit_id)
 	_attack_moves.erase(unit_id)
@@ -228,6 +231,25 @@ func _clear_move(unit_id: int) -> void:
 	_targets.erase(unit_id)
 	_paths.erase(unit_id)
 	_path_indices.erase(unit_id)
+
+
+func command_snapshot(unit_id: int) -> Dictionary:
+	if not _targets.has(unit_id):
+		return {"mode": -1, "target": null, "path": [], "final_yaw": null, "engaging": false}
+	var ids: Array[int] = [unit_id]
+	var path: Array = []
+	for point: Vector3 in move_paths(ids)[0]:
+		path.append([point.x, point.y, point.z])
+	var target := _targets[unit_id]
+	return {"mode": _move_modes[unit_id], "target": [target.x, target.y, target.z],
+		"path": path, "final_yaw": _final_yaws[unit_id], "engaging": _engaging.has(unit_id)}
+
+
+func active_command_ids() -> Array[int]:
+	var ids: Array[int] = []
+	ids.assign(_targets.keys())
+	ids.sort()
+	return ids
 
 
 func _valid_speeds(unit: UnitState) -> bool:

@@ -1,4 +1,54 @@
-## Prototype 0.2H 当前状态（自动检查通过，待人工验收）
+## 本阶段收尾保存（0.3A～0.3C；不再扩展功能）
+
+- 用户授权将本阶段成果提交并推送至现有 origin/main（https://github.com/Halfaustus/RTTGame.git），使用正常提交与推送，不改写历史。本节为最新阶段决策，以下 0.3A/B/C 小节保留开发时的验证记录。
+- 已保留：服务器固定 tick/同 tick 序号、状态/事件 RTTReplay v1、对局玩家与临时 peer 的区分、完整录制/校验发布、最小离线 1× 播放、共用表现接口及独立录制/回放进程脚本。源码、Godot UID、文档、自动测试和冻结 v1 夹具纳入保存；缓存、临时日志/运行记录/实际录制文件不入库。
+- 验收边界：0.2 已由用户人工验收并保存；用户确认 0.3B 完成。0.3C 自动验证通过，鼠标/GUI、镜头手感、路线/朝向/血条/射击画面仍待人工，不能标记为完整人工验收完成。没有实现暂停、倍速、跳转或正式历史对战列表/存储服务。
+- 已通过且未受影响的检查不重复执行：最终导入+14 项离线检查均为 0；冻结 v1 读取/往返/边界/表现兼容通过，夹具 SHA-256 为 F6B92FEE52250310AC7D13EDBDDC64F50142F3233A8FE6691B1F38BE6763CF15。实际 0.3B 文件（495 tick / 808 records）正常与实际 3 FPS 完整离线播放，最终状态/15 shot/1 death 与录制一致。必要真实 ENet 实时回归（496 tick / 808 records）、生产窗口脚本启动/停止和并存进程隔离通过。具体数值与限制保存在各验收文档，tmp/ 证据仅本地保留。
+- 已发现并修复的 3 FPS delta 截短问题及首轮测试不足保留在记录中；没有用事件完整性替代 1× 计时。Linux、长场次/大文件性能、真实磁盘满/断电、人工画面验收仍未执行。
+- 暂缓：断线重连、回放后续开发、历史对战记录。保留连接/断线事件、身份映射、tick_completed、录制格式/写入、ReplayClock/ReplayPresentation/PresentationFeed 和独立入口，不删除已有成果；不实现自动重连、旧身份/控制权恢复，不推进原计划 0.3D 跳转，也不新增历史对战系统。
+- 下一阶段起点：以本次 main 保存版本为基线，先由用户明确新的开发目标；若恢复回放相关工作，先处理现有 0.3C 待人工验收与兼容性验证，再决定控制/跳转范围。暂缓事项不得自动继续，也不得因“阶段收尾”改标完成。
+- 本轮收尾只更新状态/范围文档并检查 Git 差异、忽略规则、提交清单、敏感配置与空白；不新增功能，不重新启动已验证的游戏测试。
+- 仓库可复查证据：数值/结果已记录在 PROTOTYPE_03A/B/C 与本交接，冻结夹具受版本控制；tmp 中实际录制、PID 会话和日志仅留本地，不上传 GitHub。新检出需自行录制并通过 -ReplayFile 指定文件；实际 03C 测试的 --actual-replay/--replay-file 参数指向本地产生的完整录制，文档中的旧 tmp 路径是该次验证证据，不是随仓库分发的资产。
+
+## Prototype 0.3C 验证交接（自动检查通过，待人工验收；后续开发已暂缓）
+
+- 用户确认 0.3B 完成；不补造人工操作记录。保留全部前序未提交工作，未自动提交或推送。0.3C 不改变 RTTReplay v1 结构/游标语义，冻结夹具未修改，game_version 仅更新为新生成程序 0.3C。
+- 新 ReplayClock（open/start/advance/status/progress/finished 控制边界）与 ReplaySession/独立 replay.tscn：先结构/版本，再当前地图/规则和完整指纹清单校验，通过后才加载现有 GameWorld。加载后自动 1× 从 tick 0 播放，按 tick/sequence 完整消费，到 last_tick 停留最终状态。空 tick 正确计时，没有暂停/倍速/跳转，0.3D 再做跳转。
+- 实际 3 FPS 首轮发现 Godot 帧 delta 被截短，8.25s 文件的总测试耗时 21.737s；当时只检查事件/状态，不能算 1× 通过。改用 Time.get_ticks_usec 单调时间，补实际耗时断言，正常/3 FPS 实际进程完整重测均 0，808 全记录/最终位置/yaw/生命/存活 ID/15 shot/1 death 正确，终点不继续推进。证据 tmp/03c/playback-normal.json、playback-low-fps.json、before-clock-fix.json。
+- ReplayPresentation 缓存绝对表现状态，复用 PresentationFeed/GameWorld 的地图、单位、血条、射击线、朝向和路径。按历史对局 player_id（不是 peer）选择路线；UI 仅时间标签和 none/历史玩家下拉。切换观察只刷新当前表现，无时间变化、旧射击或复活。镜头沿用原控制，GameWorld 禁止游戏输入/RPC。
+- 离线入口不加载联机 Bootstrap，不连接服务器、不初始化导航、不执行 AI/随机抽样/伤害/权威生成。NetworkManager autoload 保持 OfflineMultiplayerPeer、timeline.tick=0、权威单位空。ReplayContent 抽取原有地图/规则 ID 与 8 文件指纹供服务器/播放器共用，生产数据/规则未修改。
+- 新 scripts/start-replay.ps1/stop-replay.ps1 支持指定 ReplayFile/GodotPath/ViewPlayerId，单独 tmp/replay-test manifest/日志/随机本地停止令牌，只管理该回放 PID/UTC/exe/角色。支持窗口，Headless 仅用于检查；等待真实播放就绪。拒绝联机 manifest，身份错/超时不关闭，重复停止安全。生产窗口实际完整播放及联机并存隔离通过，原有联机三进程不受回放停止影响，最后由本轮联机脚本正常清理。
+- 自动：导入+14 项离线回归均退出 0，包含 03C、03B、冻结 v1/03A、0.2 镜头/输入/全部移动停止战斗及 0.1 模拟。正式 03B 文件 tmp/03b/enet-225234/match.rttreplay.json 在正常及实际 3 FPS 播放；不是重新生成的替代文件。
+- 必要实时 ENet 回归 tmp/03b/enet-232338：server/driver/observer/audit 均 0，四模式/停止/双方射击死亡、加入断线和录制仍正确；808 records/header/最终状态/496 ticks/count 与独立权威采集一致。没有新增重连专项测试。
+- 最终窗口脚本证据 tmp/03c/script-verification/results.json：回放可见至495/808、身份保护、正常/重复停止、联机进程保持存活；6 类真实入口拒绝（不完整、地图、版本、指纹、缺失清单、未知 player_id）均清理。规则错误等额外离线负例通过。详细手动步骤见 PROTOTYPE_03C.md；接口/限制见 REPLAY_PLAYBACK.md。
+- 待人工：镜头鼠标/GUI与观察菜单、路线/朝向/血条/射击画面、实际观感。Linux、长文件/性能未测；低 FPS 验证保证记录/1×，不保证每个中间 tick 单独绘制或视觉流畅。所有本轮进程已结束，临时证据排除 Git，冻结 SHA-256 不变。
+
+## Prototype 0.3B 历史交接（用户后续确认完成）
+
+- 保留全部 0.3A 未提交实现和文档，没有自动提交或推送。格式仍 RTTReplay v1，旧 replay_v1.json 未修改；新生产 game_version 为 0.3B，冻结兼容性回归通过。
+- 新 ReplayRecorder 在服务器 tick 0 后/第一次模拟前启动，订阅 tick_completed 深拷贝全记录，空 tick 也入暂存日志。默认 300 tick 快照、120 tick/约 256KiB 批写入与侧车更新；正常收尾使用最终全场注册表（包括历史离线玩家），最终游标/计数与快照，验证并读回成功后 rename 发布。
+- .incomplete 是非 v1 的 NDJSON 暂存日志；.publishing 尚未发布。read_file 明确拒绝两者。失败日志/信号/可写状态文件明确报告且对局继续；不覆盖已有输出。真实强杀只留下暂存/最后已知状态，不存在 complete 文件，不会被停止脚本认定正常完成。整场最终组装/校验仍在收尾同步读入内存，长场次与磁盘满/断电未验证。
+- NetworkManager 增加 configure_recording/finish_server；Bootstrap 解析录制与本地控制参数，无结束对局 RPC。正常结束在完整 tick 消费请求/连接并结束仍在线会话：player_leave.reason 区分 transport_disconnect 与 match_end，历史玩家不删除，不实现重连/身份或控制权恢复。
+- 启动/停止脚本沿用真实生产入口与 PID/UTC/exe 身份保护，manifest v3 加会话专用请求文件/随机令牌；默认关闭录制，-RecordReplay/-ReplayOutputPath/-ReplaySnapshotTicks 配置。停止先关闭本轮客户端，然后请求服务器正常收尾、等待退出码 0/匹配回执。超时不强杀；-Force 明确报未成功收尾，重复停止也不掩盖。Windows Get-Process 先持有句柄避免正常退出码采集误报。
+- 自动：导入+13 个离线检查均退出 0。03B 覆盖深拷贝、空 tick、周期/最终快照重复边界、tick 0 结束、历史玩家、不可写路径、缺 tick、写句柄失败、日志损坏、不覆盖。03A 冻结夹具往返/兼容/边界/表现检查和完整 0.2/0.1 回归通过。
+- 真实 ENet 最终 tmp/03b/enet-225234：生产 Bootstrap/NetworkManager/ReplayRecorder +两个 headless 客户端，四移动模式/停止/双方射击伤害死亡/加入与自然断线。server/driver/observer 均退出 0；audit 0，全部 808 records 与独立服务器采集一致，header/最终 checkpoint/495 ticks/count 也严格相等；9 快照、2 join/leave、6 spawn、4 move/stop、15 shot、1 death。两次 leave 是 transport_disconnect；本轮未扩展或专项测试重连。
+- 生产窗口脚本：tmp/03b/scripts-224018/results.json 为关闭录制/开启正常收尾及重复停止/实际强制中断三种验证；tmp/03b/custom-224500/results.json 为自定义路径/7 tick 快照/错误令牌不停止/录制启动失败清理。所有本轮进程结束/7777 释放，测试不记为人工通过。
+- 已修正并保留失败证据：新 ENet SceneTree 夹具返回类型/退出信号解析错误；首次窗口脚本未缓存 Get-Process 原生句柄导致正常收尾误报失败。初次受限进程启动环境字典不可访问，经运行批准后真实测试完成；不修改系统权限。故意注入负例错误单独记为预期，最终无未解决功能失败。
+- 文档：REPLAY_RECORDING.md 说明生命周期/暂存与正式边界/配置/失败与限制；PROTOTYPE_03B.md 为人工步骤/证据/准确启动正常停止；LOCAL_TEST_ACCEPTANCE 当前指向 03B。人工操作、Linux、长录制性能和播放器未验证。尚无播放入口、播放时钟/UI；留到 0.3C。
+
+## Prototype 0.3A 历史交接（自动检查通过，待人工复查）
+
+- 用户已明确确认 0.2 人工验收并保存。开始时 Git 干净，HEAD 5598d11（前序 5b8b6d0 保存完整 0.2）。下面 0.2C～H 的“待人工”是当时历史记录，被本次用户验收结论覆盖；没有擅自编造具体人工操作日志。
+- 实现固定服务器 tick（当前 60Hz）和同 tick 共用连续事件序号。真实来源请求及连接事件排队：session→commands→movement→combat→record→replication。record 边界后才发送实时结果。保留当前 tick 数据及 tick_completed 钩子，未接入整场文件录制或播放时钟/UI。
+- 对局 match_id 与预留 seed 由服务器产生；owner_player_id 与控制用 owner_peer_id 分开，无账号系统。每次连接分配新对局玩家 ID，归属验证还检查当前玩家身份，重用 peer ID 不会取得旧玩家单位。单位 ID 持续递增，死亡不回收，快照带 retired_unit_ids/next_unit_id。
+- RTTReplay v1 显式 JSON 结构与校验涵盖初始/最终快照、命令及处理结果、四移动模式、完整剩余路径/最终朝向/暂停、位置 yaw、生命、生成/射击/死亡、玩家连接与随机关键结果预留。快照包含到 through 游标为止的完整 tick；恢复后只应用严格更晚事件，命令仅审计，不重模拟。未知版本明确拒绝，资源指纹归一换行后 SHA-256。
+- 实时与回放共用 PresentationFeed；保留 NetworkManager 原信号转发，现有订阅不失效。ReplayPresentation 只手动应用已校验的数据，GameWorld 离线模式不接网络信号、不发命令；使用对局 player_id 显示所属路线，不执行 AI/伤害/权威生成。
+- 文件范围：新增 replay/simulation_timeline.gd、replay_format.gd、replay_presentation.gd、core/presentation_feed.gd 及 UID；单位加身份字段、移动加命令状态导出，NetworkManager 调整必要调度与导出，GameWorld 注入表现源；新增 prototype_03a_test.gd/UID 与冻结 replay_v1.json。未做无关重构。
+- 0.3A 及完整 0.2/0.1 离线回归共 12 项原生退出码 0，编辑器导入/服务器隔离 17779 启动/diff 均 0。证据 tmp/03a/results.json、各日志、server-model.json/combat-model.json/round-trip.json；模型文件是测试验证数据，不是正式录制。旧 v1 夹具读取/往返、非法版本/顺序/快照边界/身份/死亡复用、实际 tick 模型及离线表现检查通过。
+- 本轮未启动客户端或真实 ENet；新调度和表现转发后的双窗口同步待复查，完整录制/播放器留到 B/C。当前没有回放入口或回放命令。AGENTS 已加入每个大版本必须验证冻结回放兼容性、显式版本/迁移决定的约束。详见 [REPLAY_FORMAT_V1.md](REPLAY_FORMAT_V1.md)、[PROTOTYPE_03A.md](PROTOTYPE_03A.md)。
+- 根证书环境报错不影响本轮已执行离线与服务器启动，Linux/TLS 未测；临时证据排除 Git。未自动提交或推送。
+
+## Prototype 0.2H 历史状态（当时自动检查通过；0.2 后续已由用户人工验收并保存）
 
 - 当前键位为 WASD 镜头平移、中键/Alt 旋转、滚轮缩放、E 停止、Q 攻击、F 快速、R 倒车、Esc 取消。S 已迁移到镜头后移，A 为镜头左移，既有 Q 目标语义不变；左键只选择，右键释放确认。没有其他预留键位功能。
 - 新增独立 `local_camera.gd`、`camera_config.gd`、`prototype_camera.tres` 及 UID，绑定原 Camera3D。保持初始视图和透视投影/FOV；地面观察点平移/轨道旋转/距离缩放，不依赖网络或修改服务器模拟。18m/s、0.2°/屏幕像素、2m/滚轮格；俯仰 20°～80°、距离 6～60m，配置集中于资源。

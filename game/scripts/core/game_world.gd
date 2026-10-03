@@ -9,6 +9,10 @@ const SELECTION_RECTANGLE: Script = preload("res://scripts/core/selection_rectan
 const MOVEMENT_PATH_VISUAL: Script = preload("res://scripts/core/movement_path_visual.gd")
 const SHOT_VISUAL: Script = preload("res://scripts/core/shot_visual.gd")
 
+@export var replay_mode := false
+var presentation_source: PresentationFeed
+var view_player_id := 0
+
 var _visual_units: Dictionary[int, Node3D] = {}
 var _selected_units: Dictionary[int, Node3D] = {}
 var _move_targets: Dictionary[int, Vector3] = {}
@@ -37,24 +41,28 @@ var _movement_mode_hint: Label
 
 
 func _ready() -> void:
+	if presentation_source == null:
+		presentation_source = PresentationFeed.new() if replay_mode else NetworkManager.presentation
+	presentation_source.reset_received.connect(_reset_replicated_units)
 	_camera.rotation_started.connect(_on_camera_rotation_started)
-	NetworkManager.unit_spawn_received.connect(_on_unit_spawn_received)
-	NetworkManager.unit_positions_received.connect(_on_unit_positions_received)
-	NetworkManager.unit_move_targets_received.connect(_on_unit_move_targets_received)
-	NetworkManager.unit_move_paths_received.connect(_on_unit_move_paths_received)
-	NetworkManager.unit_combat_state_received.connect(_on_unit_combat_state_received)
-	NetworkManager.combat_shot_received.connect(_on_combat_shot_received)
-	NetworkManager.unit_death_received.connect(_on_unit_death_received)
-	NetworkManager.unit_stops_received.connect(_on_unit_stops_received)
-	NetworkManager.unit_armament_received.connect(func(id: int, armed: bool):
+	presentation_source.unit_spawn_received.connect(_on_unit_spawn_received)
+	presentation_source.unit_positions_received.connect(_on_unit_positions_received)
+	presentation_source.unit_move_targets_received.connect(_on_unit_move_targets_received)
+	presentation_source.unit_move_paths_received.connect(_on_unit_move_paths_received)
+	presentation_source.unit_combat_state_received.connect(_on_unit_combat_state_received)
+	presentation_source.combat_shot_received.connect(_on_combat_shot_received)
+	presentation_source.unit_death_received.connect(_on_unit_death_received)
+	presentation_source.unit_stops_received.connect(_on_unit_stops_received)
+	presentation_source.unit_armament_received.connect(func(id: int, armed: bool):
 		if _visual_units.has(id):
 			_visual_units[id].armed = armed)
-	NetworkManager.unit_type_received.connect(_on_unit_type_received)
-	NetworkManager.unit_orientations_received.connect(_on_unit_orientations_received)
-	multiplayer.server_disconnected.connect(_clear_selection)
-	multiplayer.server_disconnected.connect(_clear_movement_paths)
-	multiplayer.server_disconnected.connect(_reset_replicated_units)
-	multiplayer.connected_to_server.connect(_reset_replicated_units)
+	presentation_source.unit_type_received.connect(_on_unit_type_received)
+	presentation_source.unit_orientations_received.connect(_on_unit_orientations_received)
+	if not replay_mode:
+		multiplayer.server_disconnected.connect(_clear_selection)
+		multiplayer.server_disconnected.connect(_clear_movement_paths)
+		multiplayer.server_disconnected.connect(_reset_replicated_units)
+		multiplayer.connected_to_server.connect(_reset_replicated_units)
 	var overlay := CanvasLayer.new()
 	add_child(overlay)
 	_selection_rectangle = SELECTION_RECTANGLE.new()
@@ -69,15 +77,18 @@ func _ready() -> void:
 	get_window().focus_exited.connect(_cancel_fast_move)
 	get_window().focus_exited.connect(_cancel_attack_move)
 	get_window().focus_exited.connect(_cancel_reverse_move)
-	multiplayer.server_disconnected.connect(_cancel_reverse_move)
-	multiplayer.server_disconnected.connect(_cancel_attack_move)
-	multiplayer.server_disconnected.connect(_cancel_fast_move)
+	if not replay_mode:
+		multiplayer.server_disconnected.connect(_cancel_reverse_move)
+		multiplayer.server_disconnected.connect(_cancel_attack_move)
+		multiplayer.server_disconnected.connect(_cancel_fast_move)
 	_formation_preview = Node3D.new()
 	add_child(_formation_preview)
 	set_physics_process(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if replay_mode:
+		return
 	if multiplayer.is_server():
 		return
 	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
@@ -303,7 +314,7 @@ func _pick_unit(screen_position: Vector2) -> Node3D:
 
 func _select_unit(unit: Node3D) -> void:
 	# Ownership is read from the server-provided visual metadata, never changed.
-	if unit != null and unit.owner_peer_id != multiplayer.get_unique_id():
+	if unit != null and unit.owner_peer_id != _view_owner_id():
 		return
 	var selection: Dictionary[int, Node3D] = {}
 	if unit != null:
@@ -319,7 +330,7 @@ func _select_box(rectangle: Rect2) -> void:
 			var unit := _visual_units[unit_id]
 			if not is_instance_valid(unit) or unit.is_queued_for_deletion():
 				continue
-			if unit.owner_peer_id != multiplayer.get_unique_id():
+			if unit.owner_peer_id != _view_owner_id():
 				continue
 			if camera.is_position_behind(unit.global_position):
 				continue
@@ -419,7 +430,13 @@ func _ground_at(screen_position: Vector2) -> Variant:
 	return Plane(Vector3.UP, MOVEMENT_CONFIG.ground_height).intersects_ray(camera.project_ray_origin(screen_position), camera.project_ray_normal(screen_position))
 
 
+func _view_owner_id() -> int:
+	return view_player_id if replay_mode else multiplayer.get_unique_id()
+
+
 func _request_move_at(screen_position: Vector2, mode: int = MovementSimulation.MoveMode.BASIC, end: Vector2 = Vector2.ZERO, dragged: bool = false, ground: Variant = null, tip: Variant = null) -> void:
+	if replay_mode:
+		return
 	_prune_selection()
 	var hit: Variant = ground if ground is Vector3 else _ground_at(screen_position)
 	if not hit is Vector3:
@@ -440,7 +457,7 @@ func _command_unit_ids(mode: int) -> Array[int]:
 	var ids: Array[int] = []
 	for id: int in _selected_units:
 		var unit := _selected_units[id]
-		if unit.owner_peer_id != multiplayer.get_unique_id() or unit.health <= 0:
+		if unit.owner_peer_id != _view_owner_id() or unit.health <= 0:
 			continue
 		if mode == MovementSimulation.MoveMode.REVERSE and unit.unit_type != UnitDefinition.UnitType.ARMORED_VEHICLE:
 			continue
@@ -491,10 +508,12 @@ func _on_unit_positions_received(unit_ids: Array[int], positions: Array[Vector3]
 
 
 func _request_stop_selected() -> void:
+	if replay_mode:
+		return
 	_prune_selection()
 	var unit_ids: Array[int] = []
 	for unit_id: int in _selected_units:
-		if _selected_units[unit_id].owner_peer_id == multiplayer.get_unique_id():
+		if _selected_units[unit_id].owner_peer_id == _view_owner_id():
 			unit_ids.append(unit_id)
 	if not unit_ids.is_empty():
 		NetworkManager.request_stops(unit_ids)
@@ -507,7 +526,7 @@ func _on_unit_stops_received(unit_ids: Array[int], positions: Array[Vector3]) ->
 			continue
 		var unit := _visual_units[unit_id]
 		unit.position = positions[index]
-		if unit.owner_peer_id == multiplayer.get_unique_id():
+		if unit.owner_peer_id == _view_owner_id():
 			_clear_unit_path(unit_id)
 
 
@@ -516,7 +535,7 @@ func _on_unit_move_targets_received(unit_ids: Array[int], positions: Array[Vecto
 		var unit_id := unit_ids[index]
 		if not _visual_units.has(unit_id):
 			continue
-		if _visual_units[unit_id].owner_peer_id != multiplayer.get_unique_id():
+		if _visual_units[unit_id].owner_peer_id != _view_owner_id():
 			continue
 		_clear_unit_path(unit_id)
 		_move_targets[unit_id] = positions[index]
@@ -527,7 +546,7 @@ func _on_unit_move_paths_received(unit_ids: Array[int], paths: Array[PackedVecto
 		var unit_id := unit_ids[index]
 		if not _visual_units.has(unit_id) or not _move_targets.has(unit_id):
 			continue
-		if _visual_units[unit_id].owner_peer_id != multiplayer.get_unique_id() or paths[index].size() < 2:
+		if _visual_units[unit_id].owner_peer_id != _view_owner_id() or paths[index].size() < 2:
 			continue
 		_route_points[unit_id] = paths[index]
 		_route_progress[unit_id] = 0

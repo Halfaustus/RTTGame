@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/replay/replay_session.gd" id="1"]
+
+[node name="OfflineReplay" type="Node"]
+script = ExtResource("1")

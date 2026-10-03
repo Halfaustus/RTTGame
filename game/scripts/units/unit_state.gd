@@ -3,6 +3,7 @@ extends RefCounted
 
 var unit_id: int
 var owner_peer_id: int
+var owner_player_id: int = 0
 var position: Vector3
 var yaw: float = 0.0
 var team_id: int = 1
@@ -21,7 +22,7 @@ func configure(team: int, unit_definition: UnitDefinition) -> void:
 
 
 func snapshot() -> Dictionary:
-	return {"unit_id": unit_id, "owner_peer_id": owner_peer_id, "team_id": team_id,
+	return {"unit_id": unit_id, "owner_peer_id": owner_peer_id, "owner_player_id": owner_player_id, "team_id": team_id,
 		"position": position, "yaw": yaw, "maximum_health": maximum_health, "health": health, "unit_type": unit_type(), "armed": weapon != null}
 
 
