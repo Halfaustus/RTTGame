@@ -4,8 +4,34 @@
 
 [sub_resource type="BoxMesh" id="BoxMesh_y7aj4"]
 
+[sub_resource type="BoxShape3D" id="BoxShape3D_pick"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_selection"]
+shading_mode = 0
+albedo_color = Color(0.2, 1, 0.2, 1)
+
+[sub_resource type="CylinderMesh" id="Mesh_selection"]
+material = SubResource("Material_selection")
+top_radius = 0.8
+bottom_radius = 0.8
+height = 0.03
+
 [node name="Unit" type="Node3D" unique_id=256107299]
 script = ExtResource("1_qgilm")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=498814094]
 mesh = SubResource("BoxMesh_y7aj4")
+
+[node name="PickBody" type="StaticBody3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PickBody"]
+shape = SubResource("BoxShape3D_pick")
+
+[node name="SelectionIndicator" type="MeshInstance3D" parent="."]
+visible = false
+position = Vector3(0, -0.48, 0)
+mesh = SubResource("Mesh_selection")
+cast_shadow = 0
