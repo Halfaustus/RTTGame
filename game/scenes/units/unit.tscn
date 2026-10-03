@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://bhobob43wg205"]
+
+[ext_resource type="Script" uid="uid://b8gmeyi0hqc08" path="res://scripts/units/unit.gd" id="1_qgilm"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_y7aj4"]
+
+[node name="Unit" type="Node3D" unique_id=256107299]
+script = ExtResource("1_qgilm")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=498814094]
+mesh = SubResource("BoxMesh_y7aj4")

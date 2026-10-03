@@ -1,6 +1,9 @@
 [gd_scene format=3 uid="uid://dpl2hs3vy4tbg"]
 
 [ext_resource type="Script" uid="uid://cvetbt1k6b2ah" path="res://scripts/core/bootstrap.gd" id="1_q8nw6"]
+[ext_resource type="PackedScene" uid="uid://dljenbmosfeop" path="res://scenes/maps/test_world.tscn" id="2_a6xvj"]
 
 [node name="Bootstrap" type="Node" unique_id=1365986204]
 script = ExtResource("1_q8nw6")
+
+[node name="GameWorld" parent="." unique_id=1229385123 instance=ExtResource("2_a6xvj")]
