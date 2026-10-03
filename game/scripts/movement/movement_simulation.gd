@@ -16,6 +16,7 @@ var _reverse_moves: Dictionary[int, bool] = {}
 var _final_yaws: Dictionary[int, float] = {}
 var _move_modes: Dictionary[int, int] = {}
 var _navigation := StaticNavigationGrid.new()
+var _deployment_navigation: Dictionary = {}
 
 
 func _init(config: MovementConfig) -> void:
@@ -36,6 +37,25 @@ func is_navigation_ready() -> bool:
 
 func resolve_spawn_position(position: Vector3) -> Variant:
 	return _navigation.nearest_walkable_position(position)
+
+
+func deploy_move(state: UnitState, destination: Vector3, mode: int, width: float, map: PrototypeMapDefinition = MAP_DEFINITION) -> Dictionary:
+	var navigation := _navigation
+	if not is_equal_approx(width, _config.unit_width):
+		if not _deployment_navigation.has(width):
+			var config: MovementConfig = _config.duplicate(true)
+			config.unit_width = width
+			var sized := StaticNavigationGrid.new()
+			if not sized.initialize(config, map): return {"notice":"no usable movement path", "target":state.position}
+			_deployment_navigation[width] = sized
+		navigation = _deployment_navigation[width]
+	var target := Vector3(destination.x, state.position.y, destination.z)
+	var path := navigation.deployment_path(state.position, target, mode == MoveMode.FAST, state)
+	if path.size() < 2 or path[0].is_equal_approx(path[path.size() - 1]):
+		return {"notice":"no usable movement path; remains at spawn", "target":state.position}
+	_assign_path(state.unit_id, path, mode)
+	_final_yaws[state.unit_id] = _command_yaw(state, path[1] - state.position, mode, Vector3.ZERO)
+	return {"notice":"destination adjusted to nearest reachable position" if not path[path.size() - 1].is_equal_approx(target) else "", "target":path[path.size() - 1]}
 
 
 func _assign_path(unit_id: int, path: PackedVector3Array, mode: int = MoveMode.BASIC) -> void:

@@ -121,6 +121,9 @@ Do not commit generated build artifacts.
 
 Keep commits focused on one logical change where practical.
 
+“提交小版本总结” means outputting a summary only. It does not authorize Git commit
+or push; either operation requires explicit user authorization for that operation.
+
 ## Performance
 
 Do not prematurely optimize.
@@ -133,12 +136,27 @@ Systems expected to scale with unit count should be designed with profiling and 
 
 ## Current development phase
 
-The current target is Prototype 0.3. Prototype 0.2 has been manually accepted and saved.
+The current target is Prototype 0.4D: authoritative upkeep, economic lifecycle and
+0.4 closure on the existing 0.4A/B/C deployment interfaces. Prototype 0.2 has
+been manually accepted and saved.
 Prototype 0.3A establishes state/event replay data; 0.3B adds full server recording.
 Prototype 0.3C adds minimal offline 1x playback; its manual acceptance remains pending.
 Further replay work (including seeking), reconnection and match-history features are deferred.
 Preserve the existing results and interfaces; resume only after the user sets a new scope.
 Recording success or automatic playback checks are not manual playback acceptance.
+Preserve the existing test spawning entry. 0.4C executes ground countdown/search/waiting
+and spawning; 0.4D adds authoritative upkeep and closes the economy loop. Blocked orders retain cost and reservation.
+Use match player_id for accounts; peer IDs only authenticate connections. Economy and
+orders replicate only to their owner. Do not append these domains to RTTReplay v1.
+Deployment and value scores are independent non-negative integers divisible by five;
+reject invalid values without rounding. Maintenance and account accumulation may be fractional.
+While holding a deployment card, left click places it and right click/E cancels it;
+ordinary selection/movement must not receive those inputs. Esc retains its existing behavior.
+Only one card may be held; multiple placed orders are permitted. Ground countdown is
+three seconds on server ticks; air six-second configuration is reserved only. Pickup
+pauses eligibility and replacement restarts the full countdown. Deployment adjudication
+and spawning run in session before movement commands to preserve frozen v1 spawn phases.
+Do not add air units, transport, return-to-base refunds, replay extensions or reconnection in 0.4D.
 
 Prototype 0.1 must demonstrate:
 
@@ -170,15 +188,22 @@ live connections, local AI, damage calculation, or authoritative spawning.
 Report supported/unsupported versions, automatic results, and unverified manual items
 separately. Successful serialization tests are not full replay recording or playback acceptance.
 
-## Acceptance output contract
+## 验证与汇报约定
 
-From now on, final acceptance output must contain only these three sections:
+以下约定替换旧的“每轮仅输出人工验证清单、验证证据、启动／停止命令”要求。
+小版本指 0.4A、0.4B 等阶段；大版本指完整的 0.4、0.5 等版本。
 
-1. 人工验证清单: concrete operation steps, expected results, and actual status.
-2. 验证证据: necessary log or screenshot locations, with unverified items stated explicitly.
-3. 准确的启动／停止命令: copyable commands using the actual saved scripts and parameters.
+- 小版本开发仅执行相关自动验证与必要回归，不要求人工验收；不输出人工验证清单或详细启动／停止命令。
+- 人工验收统一安排在每个大版本结束时，届时提供完整人工验证清单（操作步骤、预期结果、实际状态）、验证证据及准确启动／停止命令。
+- 小版本最终回复只需简要总结完成内容、自动验证结果、已知限制与下一步。
+- 自动验证与人工验收分别记录。未执行人工验收时，不得宣称人工通过或整个大版本已验收；自动通过不等于人工通过。
+- 每个大版本仍须执行现有冻结回放夹具兼容性检查，遵守上方 Replay compatibility 约束；小版本涉及兼容性时按相关自动回归验证。
+- “提交小版本总结”仅指输出总结，不代表授权 Git commit 或 push。
 
-Do not append development history, change summaries, or unrelated environment information.
-Put issues that affect acceptance in the relevant checklist item and supporting evidence.
-Keep script/automated verification separate from user-performed gameplay acceptance;
-never label successful script verification as manual gameplay acceptance.
+## Design baseline
+
+- docs/DESIGN_BASELINE.md is the only design authority. Read the actual local development file; never assemble design from other conversations.
+- Before each major version, review that baseline and establish the stage scope. Minor versions inherit it. Read relevant changes whenever the user explicitly updates the baseline.
+- Report missing or conflicting design; do not invent additions. HANDOFF.md records actual implementation and validation status.
+- Minor versions require related automatic checks and necessary regressions only. Major closure requires frozen replay compatibility and a complete manual checklist with exact start/stop commands.
+- Keep automatic verification separate from manual acceptance. A summary never authorizes Git commit or push.

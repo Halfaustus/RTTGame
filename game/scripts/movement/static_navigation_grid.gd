@@ -228,6 +228,43 @@ func path_cost(points: PackedVector3Array, time_cost: bool, unit: UnitState = nu
 	return cost
 
 
+# Deployment only: ordinary commands keep their existing unreachable behavior.
+func deployment_path(start: Vector3, destination: Vector3, fast: bool, unit: UnitState) -> PackedVector3Array:
+	if not _initialized or not is_position_walkable(start):
+		return PackedVector3Array()
+	if is_position_walkable(destination):
+		var exact := _path_to_exact_point(start, destination, fast, unit)
+		if not exact.is_empty(): return exact
+	# Flood only the start-connected static graph, then pick the nearest grid
+	# position to the requested point. No A* query for every candidate.
+	var visited := {}
+	var queue: Array[int] = []
+	for cell: Vector2i in _candidate_cells(start, _config.navigation_cell_size * sqrt(2.0), start):
+		if segment_is_walkable(start, _point(cell, start.y)):
+			var id := _cell_index(cell)
+			if not visited.has(id):
+				visited[id] = true
+				queue.append(id)
+	var best := start
+	var distance := start.distance_squared_to(destination)
+	var index := 0
+	while index < queue.size():
+		var id := queue[index]
+		index += 1
+		var xz := _routes.get_point_position(id)
+		var point := Vector3(xz.x, start.y, xz.y)
+		var d := point.distance_squared_to(destination)
+		if d < distance - 0.000001 or (is_equal_approx(d, distance) and (point.x < best.x or (point.x == best.x and point.z < best.z))):
+			best = point
+			distance = d
+		for next: int in _routes.get_point_connections(id):
+			if not visited.has(next):
+				visited[next] = true
+				queue.append(next)
+	if best.is_equal_approx(start): return PackedVector3Array([start])
+	return _path_to_exact_point(start, best, fast, unit)
+
+
 func _simplify(points: PackedVector3Array, time_cost: bool = false, unit: UnitState = null) -> PackedVector3Array:
 	var cumulative: Array[float] = [0.0]
 	for point_index: int in points.size() - 1:

@@ -1,6 +1,9 @@
 extends Node
 
 signal tick_completed(tick: int, records: Array[Dictionary])
+signal deployment_state_received(state: Dictionary)
+signal deployment_result_received(result: Dictionary)
+signal deployment_event(event: Dictionary)
 
 signal unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3)
 signal unit_positions_received(unit_ids: Array[int], positions: Array[Vector3])
@@ -18,6 +21,7 @@ const DEFAULT_PORT: int = 7777
 const MAX_CLIENTS: int = 16
 const MOVEMENT_CONFIG: MovementConfig = preload("res://data/prototype_movement.tres")
 const COMBAT_CONFIG: CombatConfig = preload("res://data/prototype_combat.tres")
+const DEPLOYMENT_CONFIG: DeploymentConfig = preload("res://data/prototype_deployment.tres")
 
 # Only the dedicated server writes authoritative unit state.
 var presentation := PresentationFeed.new()
@@ -25,6 +29,10 @@ var timeline := SimulationTimeline.new(Engine.physics_ticks_per_second)
 var _replication_queue: Array[Dictionary] = []
 var _pending_sessions: Array[Dictionary] = []
 var _pending_commands: Array[Dictionary] = []
+var _pending_deployment_requests: Array[Dictionary] = []
+var _dirty_deployment: Dictionary[int, bool] = {}
+var deployment := DeploymentEconomy.new()
+var local_deployment_state: Dictionary = {}
 var _peer_players: Dictionary[int, int] = {}
 var _players: Dictionary[int, Dictionary] = {}
 var _next_player_id := 1
@@ -46,6 +54,8 @@ var _player_spawn_index: int = 1
 
 
 func _ready() -> void:
+	deployment.state_changed.connect(func(player_id: int): _dirty_deployment[player_id] = true)
+	deployment.event_emitted.connect(deployment_event.emit)
 	presentation.unit_spawn_received.connect(unit_spawn_received.emit)
 	presentation.unit_positions_received.connect(unit_positions_received.emit)
 	presentation.unit_move_targets_received.connect(unit_move_targets_received.emit)
@@ -66,6 +76,8 @@ func _ready() -> void:
 
 
 func start_server(port: int = DEFAULT_PORT) -> bool:
+	if not _ensure_deployment_ready():
+		return false
 	# Finish the synchronous static grid before accepting connections or commands.
 	if not _movement.is_navigation_ready() and not _movement.initialize_navigation():
 		push_error("Dedicated server navigation initialization failed.")
@@ -163,6 +175,7 @@ func _apply_peer_join(peer_id: int) -> void:
 	_next_player_id += 1
 	_peer_players[peer_id] = player_id
 	_players[player_id] = {"player_id": player_id, "label": "Player %d" % player_id}
+	deployment.register_player(player_id, COMBAT_CONFIG.player_team_id, timeline.tick)
 	timeline.append("event", "player_join", {"player_id": player_id, "peer_id": peer_id})
 	# Keep current peer ownership for control; the match player ID is archival identity.
 	if multiplayer.get_peers().has(peer_id):
@@ -180,6 +193,8 @@ func _apply_peer_join(peer_id: int) -> void:
 		state.owner_player_id = player_id
 		state.configure(COMBAT_CONFIG.player_team_id, COMBAT_CONFIG.player_definitions[index % COMBAT_CONFIG.player_definitions.size()])
 		_authoritative_units[unit_id] = state
+		state.generated_tick = timeline.tick
+		deployment.register_live_unit(unit_id, player_id, state.definition, state.generated_tick)
 		_movement.add_unit(state)
 		_combat.add_unit(state)
 		timeline.append("event", "spawn", ReplayFormat.unit_state(state, _movement))
@@ -334,8 +349,16 @@ func _physics_process(_delta: float) -> void:
 
 func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	# One authoritative fixed step. Network callback arrival never mutates simulation.
+	if not _ensure_deployment_ready():
+		return
 	timeline.begin_tick()
+	deployment.begin_tick(timeline.tick)
 	_consume_sessions(connected_peers)
+	deployment.advance_to_tick(timeline.tick)
+	_consume_deployment_requests(connected_peers)
+	deployment.execute_deployments(_authoritative_units, _spawn_deployment)
+	# Frozen v1 spawn events belong to session. Deployment requests are a
+	# separate economic stream, adjudicated here before any spawn or movement.
 	timeline.enter_phase("commands")
 	_consume_commands(connected_peers)
 	timeline.enter_phase("movement")
@@ -360,6 +383,7 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 		if not multiplayer.get_peers().is_empty():
 			_queue_replication("_receive_combat_shot", [shot])
 	for id: int in combat_result["deaths"]:
+		deployment.remove_live_unit(id)
 		_retired_unit_ids.append(id)
 		timeline.append("event", "death", {"unit_id": id})
 		_authoritative_units.erase(id)
@@ -376,6 +400,12 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	# Future recorder consumes completed state/events here; no whole-match buffer in A.
 	tick_completed.emit(timeline.tick, timeline.records.duplicate(true))
 	timeline.enter_phase("replication")
+	if timeline.tick % maxi(1, timeline.tick_hz / 10) == 0:
+		for peer_id: int in _peer_players:
+			var player_id := _peer_players[peer_id]
+			if _dirty_deployment.has(player_id):
+				_queue_replication("_receive_deployment_state", [deployment.export_player(player_id)], peer_id)
+		_dirty_deployment.clear()
 	_replication_elapsed += delta
 	if _replication_elapsed >= MOVEMENT_CONFIG.replication_interval or not _movement.has_active_moves():
 		if not _pending_positions.is_empty() and not multiplayer.get_peers().is_empty():
@@ -565,3 +595,134 @@ func _flush_replication() -> void:
 			callv("rpc", [StringName(message.method)] + message.arguments)
 		elif multiplayer.get_peers().has(message.peer_id):
 			callv("rpc_id", [message.peer_id, StringName(message.method)] + message.arguments)
+
+
+func _ensure_deployment_ready() -> bool:
+	if deployment.is_ready():
+		return true
+	var error := deployment.initialize(DEPLOYMENT_CONFIG, MOVEMENT_CONFIG, MovementSimulation.MAP_DEFINITION, timeline.tick_hz)
+	if not error.is_empty():
+		push_error("Deployment configuration rejected: " + error)
+		return false
+	return true
+
+
+func request_deployment(config_id: String, point_id: String, destination: Vector3) -> void:
+	if not multiplayer.is_server() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+		_submit_deployment.rpc_id(1, config_id, point_id, destination)
+
+
+func request_cancel_deployment(order_id: int) -> void:
+	if not multiplayer.is_server() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+		_submit_cancel_deployment.rpc_id(1, order_id)
+
+
+func request_buy_deployment(config_id: String, point_id: String, request_id: int) -> void:
+	if not multiplayer.is_server() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+		_submit_buy_deployment.rpc_id(1, config_id, point_id, request_id)
+
+
+func request_edit_deployment(action: String, order_id: int, destination: Vector3, request_id: int, mode: int = MovementSimulation.MoveMode.BASIC) -> void:
+	if not multiplayer.is_server() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+		_submit_edit_deployment.rpc_id(1, action, order_id, destination, request_id, mode)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _submit_buy_deployment(config_id: String, point_id: String, request_id: int) -> void:
+	_queue_deployment_request({"type":"buy", "config_id":config_id,"point_id":point_id,"request_id":request_id})
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _submit_edit_deployment(action: String, order_id: int, destination: Vector3, request_id: int, mode: int = MovementSimulation.MoveMode.BASIC) -> void:
+	_queue_deployment_request({"type":"edit","action":action,"order_id":order_id,"destination":destination,"request_id":request_id,"mode":mode})
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _submit_deployment(config_id: String, point_id: String, destination: Vector3) -> void:
+	_queue_deployment_request({"type": "order", "config_id": config_id, "point_id": point_id, "destination": destination})
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _submit_cancel_deployment(order_id: int) -> void:
+	_queue_deployment_request({"type": "cancel", "order_id": order_id})
+
+
+func _queue_deployment_request(request: Dictionary) -> void:
+	if not multiplayer.is_server():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if not multiplayer.get_peers().has(sender) or not _peer_players.has(sender):
+		return
+	request.peer_id = sender
+	request.player_id = _peer_players[sender]
+	_pending_deployment_requests.append(request)
+
+
+func _consume_deployment_requests(connected_peers: PackedInt32Array) -> void:
+	var requests := _pending_deployment_requests
+	_pending_deployment_requests = []
+	for request: Dictionary in requests:
+		if not connected_peers.has(request.peer_id) or _peer_players.get(request.peer_id, 0) != request.player_id:
+			continue
+		var result: Dictionary
+		if request.type == "order":
+			result = deployment.request_order(request.player_id, request.config_id, request.point_id, request.destination)
+		elif request.type == "buy":
+			result = deployment.buy_order(request.player_id, request.config_id, request.point_id)
+		elif request.type == "edit":
+			match request.action:
+				"pickup": result = deployment.pickup_order(request.player_id, request.order_id)
+				"place": result = deployment.place_order(request.player_id, request.order_id, request.destination, request.get("mode", MovementSimulation.MoveMode.BASIC))
+				"cancel": result = deployment.cancel_order(request.player_id, request.order_id)
+				_: result = {"ok":false,"reason":"invalid deployment action"}
+		elif request.type == "cancel":
+			result = deployment.cancel_order(request.player_id, request.order_id)
+		else:
+			result = {"ok":false,"reason":"invalid deployment action"}
+		result.request_type = request.type
+		result.request_id = request.get("request_id", 0)
+		# Always return authoritative state, including on refusal, for UI recovery.
+		_queue_replication("_receive_deployment_state", [deployment.export_player(request.player_id)], request.peer_id)
+		_queue_replication("_receive_deployment_result", [result], request.peer_id)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_deployment_state(state: Dictionary) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1:
+		return
+	local_deployment_state = state.duplicate(true)
+	deployment_state_received.emit(state.duplicate(true))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_deployment_result(result: Dictionary) -> void:
+	if not multiplayer.is_server() and multiplayer.get_remote_sender_id() == 1:
+		deployment_result_received.emit(result.duplicate(true))
+
+
+func _spawn_deployment(order: Dictionary, position: Vector3, entry: Dictionary, point: Dictionary) -> int:
+	var peer_id := 0
+	for peer: int in _peer_players:
+		if _peer_players[peer] == order.player_id:
+			peer_id = peer
+	var state := UnitState.new(_next_unit_id, peer_id, position)
+	_next_unit_id += 1
+	state.owner_player_id = order.player_id
+	state.configure(deployment.export_player(order.player_id).faction_id, entry.definition)
+	state.yaw = point.yaw
+	state.generated_tick = timeline.tick
+	_authoritative_units[state.unit_id] = state
+	_movement.add_unit(state)
+	_combat.add_unit(state)
+	var movement := _movement.deploy_move(state, order.destination, order.move_mode, entry.width)
+	# Existing v1 unit/path state and spawn event suffice; economic/order state is
+	# deliberately absent from the frozen replay format.
+	timeline.append("event", "spawn", ReplayFormat.unit_state(state, _movement))
+	_queue_replication("_receive_unit_snapshot", [state.snapshot()])
+	var ids: Array[int] = [state.unit_id]
+	if peer_id != 0:
+		if _movement._targets.has(state.unit_id):
+			_queue_replication("_receive_move_targets", [ids, _movement.move_targets(ids)], peer_id)
+			_queue_replication("_receive_move_paths", [ids, _movement.move_paths(ids)], peer_id)
+		_queue_replication("_receive_deployment_result", [{"ok":true,"request_id":0,"request_type":"generated","order_id":order.order_id,"unit_id":state.unit_id,"generated_tick":timeline.tick,"notice":movement.notice}], peer_id)
+	return state.unit_id

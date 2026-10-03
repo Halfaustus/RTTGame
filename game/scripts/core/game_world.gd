@@ -35,6 +35,7 @@ var _fast_move_armed: bool = false
 var _attack_move_armed: bool = false
 var _reverse_move_armed: bool = false
 var _movement_mode_hint: Label
+var _deployment_ui: DeploymentUI
 
 @onready var _units: Node3D = $Units
 @onready var _camera: Camera3D = $Units/Camera3D
@@ -73,6 +74,19 @@ func _ready() -> void:
 	_movement_mode_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_movement_mode_hint.hide()
 	overlay.add_child(_movement_mode_hint)
+	if not replay_mode:
+		_deployment_ui = DeploymentUI.new()
+		_deployment_ui.setup(_camera, _ground_at)
+		_deployment_ui.input_ownership_changed.connect(func(active: bool):
+			if active:
+				_cancel_drag()
+				_cancel_right_drag()
+				_cancel_fast_move()
+				_cancel_attack_move()
+				_cancel_reverse_move()
+				_pending_actions.clear()
+				set_physics_process(false))
+		overlay.add_child(_deployment_ui)
 	get_window().focus_exited.connect(_cancel_drag)
 	get_window().focus_exited.connect(_cancel_fast_move)
 	get_window().focus_exited.connect(_cancel_attack_move)
@@ -97,6 +111,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_world_input(event: InputEvent) -> void:
+	if _deployment_ui != null and not _camera.is_rotating() and _deployment_ui.handle_world_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	# Called only after connection/role checks; kept separate for offline input checks.
 	if _camera.is_rotating():
 		get_viewport().set_input_as_handled()

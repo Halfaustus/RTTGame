@@ -9,6 +9,7 @@ var yaw: float = 0.0
 var team_id: int = 1
 var maximum_health: float = 100.0
 var health: float = 100.0
+var generated_tick: int = -1
 var weapon: WeaponDefinition
 var definition: UnitDefinition
 

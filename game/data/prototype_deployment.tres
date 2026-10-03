@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="DeploymentConfig" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/deployment/deployment_config.gd" id="1"]
+[ext_resource type="Resource" path="res://data/unit_mobile.tres" id="2"]
+[ext_resource type="Resource" path="res://data/unit_stationary.tres" id="3"]
+[ext_resource type="Resource" path="res://data/unit_unarmed.tres" id="4"]
+
+[resource]
+script = ExtResource("1")
+temporary_test_values = true
+catalog = Array[Dictionary]([{
+"config_id": "test.armored", "category": "armored_vehicle", "definition": ExtResource("2"),
+"value_points": 500, "sortie_points": 300, "maximum_present": 4, "width": 1.0
+}, {
+"config_id": "test.rifle", "category": "infantry", "definition": ExtResource("3"),
+"value_points": 200, "sortie_points": 150, "maximum_present": 6, "width": 1.0
+}, {
+"config_id": "test.unarmed", "category": "infantry", "definition": ExtResource("4"),
+"value_points": 50, "sortie_points": 40, "maximum_present": 8, "width": 1.0
+}])
+points = Array[Dictionary]([{
+"point_id": "ground.west", "position": Vector3(-12, 0.5, 112), "yaw": 0.0,
+"entry_kind": "ground", "allowed_factions": [1], "allowed_categories": []
+}, {
+"point_id": "ground.east", "position": Vector3(12, 0.5, 112), "yaw": 0.0,
+"entry_kind": "ground", "allowed_factions": [1], "allowed_categories": []
+}])
