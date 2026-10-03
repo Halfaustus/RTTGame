@@ -100,6 +100,9 @@ Before implementing a non-trivial feature:
 
 Prefer small, reviewable changes.
 
+Do not launch windowed or headless clients for testing unless the user explicitly requests client tests.
+Use static checks, editor imports, and isolated simulation tests by default.
+
 Do not perform broad refactors unless required.
 
 Do not modify unrelated files.

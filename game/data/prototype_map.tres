@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="PrototypeMapDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/maps/prototype_map_definition.gd" id="1_map"]
+
+[resource]
+script = ExtResource("1_map")
+obstacles = Array[Rect2]([Rect2(-4, 93.5, 8, 1), Rect2(5, 89, 2, 3)])
+obstacle_height = 2.5

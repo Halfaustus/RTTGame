@@ -1,9 +1,13 @@
 [gd_scene format=3 uid="uid://dljenbmosfeop"]
 
 [ext_resource type="Script" path="res://scripts/core/game_world.gd" id="1_world"]
+[ext_resource type="Script" path="res://scripts/maps/test_map_geometry.gd" id="2_map"]
 
 [node name="GameWorld" type="Node3D" unique_id=1229385123]
 script = ExtResource("1_world")
+
+[node name="StaticMap" type="Node3D" parent="."]
+script = ExtResource("2_map")
 
 [node name="Units" type="Node3D" parent="." unique_id=1038493142]
 

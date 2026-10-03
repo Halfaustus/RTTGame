@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="MovementConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/movement/movement_config.gd" id="1_config"]
+
+[resource]
+script = ExtResource("1_config")
+speed = 4.0
+replication_interval = 0.05
+spawn_origin = Vector3(-3, 0.5, 100)
+spawn_spacing = 3.0
+spawn_columns = 3
+units_per_peer = 3
+unit_width = 1.0
+destination_gap = 0.5
+navigation_cell_size = 0.5
+obstacle_margin = 0.05
+target_search_radius = 2.0
+ground_height = 0.0
+minimum_xz = Vector2(-20, 80)
+maximum_xz = Vector2(60, 120)
