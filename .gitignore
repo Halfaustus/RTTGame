@@ -1,0 +1,26 @@
+﻿# Godot
+game/.godot/
+
+# Godot generated/imported
+*.tmp
+
+# Builds
+builds/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+temp/
+tmp/
