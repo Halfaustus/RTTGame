@@ -6,3 +6,5 @@
 script = ExtResource("1_map")
 obstacles = Array[Rect2]([Rect2(-4, 93.5, 8, 1), Rect2(5, 89, 2, 3)])
 obstacle_height = 2.5
+hardened_surfaces = Array[Rect2]([Rect2(-9, 101, 2, 6), Rect2(-9, 105, 18, 2), Rect2(7, 101, 2, 6)])
+route_test_points = Array[Vector3]([Vector3(-8, 0.1, 102), Vector3(8, 0.1, 102), Vector3(-4, 0.1, 102)])

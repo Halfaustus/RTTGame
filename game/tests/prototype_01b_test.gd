@@ -78,6 +78,8 @@ func _run() -> void:
 		if role == "simulation" or not _simulation_passed:
 			quit(0 if _simulation_passed else 1)
 			return
+		# Keep this movement-only fixture's original player IDs and no combat targets.
+		_network._rebels_initialized = true
 		assert(_network.start_server(port))
 		return
 	assert(role in ["driver", "observer", "late"])

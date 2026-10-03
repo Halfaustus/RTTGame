@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="CameraConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/camera_config.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+movement_speed = 18.0
+rotation_degrees_per_pixel = 0.2
+zoom_step = 2.0
+minimum_pitch_degrees = 20.0
+maximum_pitch_degrees = 80.0
+minimum_distance = 6.0
+maximum_distance = 60.0
+ground_height = 0.0

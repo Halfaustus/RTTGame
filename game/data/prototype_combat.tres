@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CombatConfig" load_steps=6 format=3]
+[ext_resource type="Script" path="res://scripts/combat/combat_config.gd" id="1"]
+[ext_resource type="Resource" path="res://data/unit_mobile.tres" id="2"]
+[ext_resource type="Resource" path="res://data/unit_stationary.tres" id="3"]
+[ext_resource type="Resource" path="res://data/unit_unarmed.tres" id="4"]
+[ext_resource type="Script" path="res://scripts/units/unit_definition.gd" id="5"]
+[resource]
+script = ExtResource("1")
+player_team_id = 1
+rebel_team_id = 2
+player_definitions = Array[ExtResource("5")]([ExtResource("2"), ExtResource("3"), ExtResource("4")])
+rebel_definition = ExtResource("3")
+rebel_positions = Array[Vector3]([Vector3(-3, 0.5, 90), Vector3(3, 0.5, 90), Vector3(8, 0.5, 90)])

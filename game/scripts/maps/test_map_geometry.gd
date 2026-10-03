@@ -7,6 +7,26 @@ const DEFINITION: PrototypeMapDefinition = preload("res://data/prototype_map.tre
 func _ready() -> void:
 	var bounds := Rect2(CONFIG.minimum_xz, CONFIG.maximum_xz - CONFIG.minimum_xz)
 	_add_box("Ground", bounds, 0.1, CONFIG.ground_height - 0.05, Color(0.16, 0.2, 0.23))
+	for index: int in DEFINITION.hardened_surfaces.size():
+		var road := MeshInstance3D.new()
+		road.name = "Road_%d" % index
+		var rectangle := DEFINITION.hardened_surfaces[index]
+		var box := BoxMesh.new()
+		box.size = Vector3(rectangle.size.x, 0.02, rectangle.size.y)
+		road.mesh = box
+		road.position = Vector3(rectangle.get_center().x, CONFIG.ground_height + 0.01, rectangle.get_center().y)
+		var material := StandardMaterial3D.new()
+		material.albedo_color = Color(0.5, 0.52, 0.55)
+		road.material_override = material
+		add_child(road)
+	for index: int in DEFINITION.route_test_points.size():
+		var marker := Label3D.new()
+		marker.name = "RouteMarker_%d" % index
+		marker.text = "A" if index == 0 else ("B" if index == 1 else "C")
+		marker.position = DEFINITION.route_test_points[index]
+		marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		marker.font_size = 64
+		add_child(marker)
 	for index: int in DEFINITION.obstacles.size():
 		_add_box("Obstacle_%d" % index, DEFINITION.obstacles[index], DEFINITION.obstacle_height,
 			CONFIG.ground_height + DEFINITION.obstacle_height * 0.5, Color(0.65, 0.45, 0.3))

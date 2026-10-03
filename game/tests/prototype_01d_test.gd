@@ -144,7 +144,7 @@ func _unreachable_preserves_orders() -> void:
 	var old_index: int = simulation._path_indices[1]
 	_check(simulation.request_move(1, 42, Vector3(-3, 0, 90)) == "no reachable destination", "disconnected destination rejected")
 	_check(simulation._targets[1] == old_target and simulation._paths[1] == old_path, "single failure preserves old target and path")
-	var group := simulation.request_group_move([2, 1], 42, Vector3(0, 0, 90))
+	var group := simulation.request_group_move([2, 1], 42, Vector3(0, 0, 90), MovementSimulation.MoveMode.BASIC, Vector3.FORWARD)
 	_check(group["unit_ids"] == [2] and group["failed_ids"] == [1], "per-unit reachability permits partial acceptance")
 	_check(simulation._targets[1] == old_target and simulation._paths[1] == old_path and simulation._path_indices[1] == old_index, "failed group member keeps complete old order")
 	simulation.advance(10.0)
@@ -156,7 +156,7 @@ func _unreachable_preserves_orders() -> void:
 func _geometry_check() -> void:
 	var geometry = load("res://scripts/maps/test_map_geometry.gd").new()
 	root.add_child(geometry)
-	_check(geometry.get_child_count() == MAP.obstacles.size() + 1, "map contains ground and shared obstacles")
+	_check(geometry.get_child_count() == MAP.obstacles.size() + MAP.hardened_surfaces.size() + MAP.route_test_points.size() + 1, "map contains ground, roads, markers and shared obstacles")
 	for index: int in MAP.obstacles.size():
 		var body: StaticBody3D = geometry.get_node("Obstacle_%d" % index)
 		var shape: BoxShape3D = body.get_child(0).shape
@@ -186,7 +186,9 @@ func _run() -> void:
 		var network := root.get_node("NetworkManager")
 		_check(network.start_server(17779), "headless dedicated server starts")
 		_check(network._movement.is_navigation_ready(), "navigation ready when server begins listening")
-		_check(network._authoritative_units.is_empty(), "dedicated server has no player units")
+		# 0.2A adds neutral-owner rebels; the dedicated server is still not a player.
+		for state: UnitState in network._authoritative_units.values():
+			_check(state.owner_peer_id == 0, "dedicated server starts only unowned rebels, no player units")
 		if network.multiplayer.has_multiplayer_peer():
 			network.multiplayer.multiplayer_peer.close()
 	else:

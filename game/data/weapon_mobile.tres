@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="WeaponDefinition" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/combat/weapon_definition.gd" id="1"]
+[resource]
+script = ExtResource("1")
+range_m = 8.0
+damage = 10.0
+firing_interval = 1.0
+can_fire_while_moving = true

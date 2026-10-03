@@ -1,148 +1,155 @@
 [CmdletBinding()]
 param(
-    [string]$GodotPath,
-    [ValidateRange(1, 120)]
-    [int]$StartupTimeoutSeconds = 30
+    [string]$GodotPath = 'C:\Dev\Godot\Godot.exe',
+    [ValidateRange(1, 120)][int]$StartupTimeoutSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $gamePath = Join-Path $projectRoot 'game'
+$sessionRoot = Join-Path $projectRoot 'tmp/local-test'
 $startedProcesses = @()
+$sessionStatus = 'starting'
+$sessionError = $null
+$sessionId = [Guid]::NewGuid().ToString('N')
+$logDirectory = Join-Path $sessionRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $sessionId)
+$sessionFile = Join-Path $logDirectory 'session.json'
+$resolvedGodotPath = $null
+
+function Write-JsonFile([string]$Path, $Value) {
+    [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+}
 
 function Save-TestSession {
-    $records = @($startedProcesses | ForEach-Object {
-        [pscustomobject]@{
-            Name = $_.Name
-            ProcessId = $_.Process.Id
-            StartTimeUtc = $_.Process.StartTime.ToUniversalTime().ToString('o')
-            ExecutablePath = $resolvedGodotPath
-            LogPath = $_.LogPath
-        }
+    $records = @($startedProcesses | ForEach-Object { $_.Record })
+    Write-JsonFile $sessionFile ([pscustomobject]@{
+        Version = 2; SessionId = $sessionId; ProjectPath = $gamePath
+        Status = $sessionStatus; Error = $sessionError; Processes = $records
     })
-    [pscustomobject]@{ Version = 1; ProjectPath = $gamePath; Processes = $records } |
-        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $sessionFile -Encoding UTF8
 }
 
-function Start-TestProcess {
-    param([string]$Name, [string[]]$Arguments)
+function Assert-PortAvailable([int]$Port) {
+    # Exclusive wildcard binds detect conflicts without CIM/admin permissions.
+    $probes = @()
+    try {
+        foreach ($family in @([Net.Sockets.AddressFamily]::InterNetwork, [Net.Sockets.AddressFamily]::InterNetworkV6)) {
+            if ($family -eq [Net.Sockets.AddressFamily]::InterNetworkV6 -and -not [Net.Sockets.Socket]::OSSupportsIPv6) { continue }
+            $probe = [Net.Sockets.Socket]::new($family, [Net.Sockets.SocketType]::Dgram, [Net.Sockets.ProtocolType]::Udp)
+            $probes += $probe
+            $probe.ExclusiveAddressUse = $true
+            if ($family -eq [Net.Sockets.AddressFamily]::InterNetworkV6) { $probe.DualMode = $false }
+            $address = if ($family -eq [Net.Sockets.AddressFamily]::InterNetwork) { [Net.IPAddress]::Any } else { [Net.IPAddress]::IPv6Any }
+            $probe.Bind([Net.IPEndPoint]::new($address, $Port))
+        }
+    } catch {
+        throw "UDP port $Port is occupied or cannot be bound. No test processes started. $($_.Exception.Message)"
+    } finally {
+        foreach ($probe in $probes) { $probe.Dispose() }
+    }
+}
 
+function Start-TestProcess([string]$Name, [string[]]$ExtraArguments) {
     $logPath = Join-Path $logDirectory "$Name.log"
-    # Godot's own log captures output even when a GUI executable is used.
-    $allArguments = @('--path', $gamePath, '--log-file', $logPath) + $Arguments
-    $quotedArguments = $allArguments | ForEach-Object { '"' + $_ + '"' }
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $resolvedGodotPath
-    $startInfo.Arguments = $quotedArguments -join ' '
-    $startInfo.WorkingDirectory = $gamePath
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $arguments = @('--path', $gamePath, '--log-file', $logPath) + $ExtraArguments
+    if (@($arguments | Where-Object { $_.Contains('"') }).Count) { throw 'Paths containing double quotes are unsupported.' }
+    $argumentString = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $resolvedGodotPath
+    $info.Arguments = $argumentString
+    $info.WorkingDirectory = $gamePath
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.WindowStyle = if ($Name -eq 'server') { [Diagnostics.ProcessWindowStyle]::Hidden } else { [Diagnostics.ProcessWindowStyle]::Normal }
+    # Only these children use project-local user data; parent/system variables are unchanged.
+    $info.EnvironmentVariables['APPDATA'] = Join-Path $logDirectory 'appdata'
+    $info.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $logDirectory 'localappdata'
+    $process = [Diagnostics.Process]::Start($info)
+    $instance = [pscustomobject]@{ Name = $Name; Process = $process; LogPath = $logPath; Record = $null }
+    $script:startedProcesses += $instance
+    $instance.Record = [pscustomobject]@{
+        Name = $Name; ProcessId = $process.Id
+        StartTimeUtc = $process.StartTime.ToUniversalTime().ToString('o')
+        ExecutablePath = $resolvedGodotPath; ProcessName = $process.ProcessName
+        Arguments = $argumentString; LogPath = $logPath; SessionId = $sessionId
+    }
+    Save-TestSession
     Write-Host "$Name started: PID $($process.Id); log: $logPath"
-    return [pscustomobject]@{ Name = $Name; Process = $process; LogPath = $logPath }
+    return $instance
 }
 
-function Wait-TestReady {
-    param($Instance, [string]$ReadyPattern)
+function Read-ActiveLog([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $stream = $null
+    $reader = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $reader = [IO.StreamReader]::new($stream)
+        return $reader.ReadToEnd()
+    } catch [IO.IOException] { return '' } finally {
+        if ($null -ne $reader) { $reader.Dispose() } elseif ($null -ne $stream) { $stream.Dispose() }
+    }
+}
 
+function Wait-TestReady($Instance, [string]$Marker) {
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         foreach ($running in $startedProcesses) {
-            if ($running.Process.HasExited) {
-                throw "$($running.Name) exited (code $($running.Process.ExitCode)). Log: $($running.LogPath)"
+            if ($running.Process.HasExited) { throw "$($running.Name) exited: $($running.Process.ExitCode). Log: $($running.LogPath)" }
+            if (Test-Path -LiteralPath $running.LogPath) {
+                $content = Read-ActiveLog $running.LogPath
+                if ($content -match 'SCRIPT ERROR:|Failed to start server|startup failed|Connection to server failed|Failed to create client connection|Disconnected from server') {
+                    throw "$($running.Name) startup/connection failed. Log: $($running.LogPath)"
+                }
             }
         }
-        if (Test-Path -LiteralPath $Instance.LogPath) {
-            $content = Get-Content -LiteralPath $Instance.LogPath -Raw
-            if ($content -match 'Failed to start server|startup failed|Connection to server failed|Failed to create client connection|Disconnected from server|SCRIPT ERROR:') {
-                throw "$($Instance.Name) reported a startup/connection error. Log: $($Instance.LogPath)"
-            }
-            if ($content -match $ReadyPattern) {
-                Write-Host "$($Instance.Name) ready."
-                return
-            }
-        }
+        if ((Read-ActiveLog $Instance.LogPath).Contains($Marker)) { return }
         Start-Sleep -Milliseconds 100
     }
     throw "$($Instance.Name) timed out after $StartupTimeoutSeconds seconds. Log: $($Instance.LogPath)"
 }
 
 try {
-    if (-not (Test-Path -LiteralPath (Join-Path $gamePath 'project.godot'))) {
-        throw "Godot project not found: $gamePath"
-    }
-    if ([string]::IsNullOrWhiteSpace($GodotPath)) {
-        foreach ($candidate in @('Godot_console.exe', 'Godot.exe', 'godot')) {
-            $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue
-            if ($command) {
-                $GodotPath = $command.Source
-                break
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($GodotPath)) {
-            throw 'Godot executable not found on PATH. Supply -GodotPath with its full path.'
-        }
-    }
+    [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
+    Save-TestSession
+    if (-not (Test-Path -LiteralPath (Join-Path $gamePath 'project.godot'))) { throw "Project missing: $gamePath" }
     $resolvedGodotPath = (Resolve-Path -LiteralPath $GodotPath).Path
-    if (-not (Test-Path -LiteralPath $resolvedGodotPath -PathType Leaf)) {
-        throw "Godot executable is not a file: $resolvedGodotPath"
+    if (-not (Test-Path -LiteralPath $resolvedGodotPath -PathType Leaf)) { throw 'GodotPath must be an executable file.' }
+    # Windows console binaries are wrappers. Launch/record the actual engine, not its wrapper PID.
+    if ([IO.Path]::GetFileName($resolvedGodotPath) -match '(?i)_console\.exe$') {
+        $enginePath = $resolvedGodotPath -replace '(?i)_console\.exe$', '.exe'
+        if (-not (Test-Path -LiteralPath $enginePath -PathType Leaf)) { throw "Console wrapper requires matching engine: $enginePath" }
+        $resolvedGodotPath = (Resolve-Path -LiteralPath $enginePath).Path
     }
-
-    # Read the existing port rather than introducing a launcher port override.
-    $networkScript = Get-Content -LiteralPath (Join-Path $gamePath 'scripts/networking/network_manager.gd') -Raw
-    if ($networkScript -notmatch 'const DEFAULT_PORT:\s*int\s*=\s*(\d+)') {
-        throw 'Cannot determine DEFAULT_PORT from network_manager.gd.'
-    }
+    $networkCode = [IO.File]::ReadAllText((Join-Path $gamePath 'scripts/networking/network_manager.gd'))
+    if ($networkCode -notmatch 'const DEFAULT_PORT:\s*int\s*=\s*(\d+)') { throw 'Cannot read production DEFAULT_PORT.' }
     $port = [int]$Matches[1]
-    # Query all addresses, including wildcard/IPv6 bindings. Fail closed if querying fails.
-    $endpoints = @(Get-NetUDPEndpoint -ErrorAction Stop | Where-Object { $_.LocalPort -eq $port })
-    if ($endpoints.Count -gt 0) {
-        foreach ($endpoint in $endpoints) {
-            $ownerProcessId = $endpoint.OwningProcess
-            $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
-            Write-Host "UDP $($endpoint.LocalAddress):$port occupied: PID $ownerProcessId"
-            if ($owner) {
-                Write-Host "Name: $($owner.Name); executable: $($owner.ExecutablePath)"
-                Write-Host "Command line: $($owner.CommandLine)"
-            } else {
-                Write-Host 'Process information unavailable (it may have exited or require permission).'
-            }
-        }
-        throw "UDP port $port is already occupied. No test processes were started."
+    Assert-PortAvailable $port
+    Write-Host "Logs and session: $logDirectory"
+    $server = Start-TestProcess 'server' @('--headless', '--', '--server')
+    Wait-TestReady $server "Dedicated server started on port $port."
+    foreach ($clientName in @('client-A', 'client-B')) {
+        $client = Start-TestProcess $clientName @('--windowed')
+        Wait-TestReady $client 'Connected to server. Local peer ID:'
     }
-    $sessionName = 'RTTGame-local-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-    $logDirectory = Join-Path ([IO.Path]::GetTempPath()) $sessionName
-    New-Item -ItemType Directory -Path $logDirectory | Out-Null
-    $sessionFile = Join-Path $logDirectory 'session.json'
+    $sessionStatus = 'ready'
     Save-TestSession
-    Write-Host "Project: $gamePath"
-    Write-Host "Godot: $resolvedGodotPath"
-    Write-Host "Server endpoint: 127.0.0.1:$port"
-    Write-Host "Logs: $logDirectory"
-    Write-Host "Session: $sessionFile"
-    $stopScript = Join-Path $PSScriptRoot 'stop-local-test.ps1'
-    Write-Host "Stop this session: powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$stopScript`" -SessionFile `"$sessionFile`""
-
-    # --server is consumed by bootstrap.gd through get_cmdline_user_args().
-    $server = Start-TestProcess -Name 'server' -Arguments @('--headless', '--', '--server')
-    $startedProcesses += $server
-    Save-TestSession
-    Wait-TestReady -Instance $server -ReadyPattern ([regex]::Escape("Dedicated server started on port $port."))
-
-    foreach ($clientName in @('client1', 'client2')) {
-        $client = Start-TestProcess -Name $clientName -Arguments @()
-        $startedProcesses += $client
-        Save-TestSession
-        Wait-TestReady -Instance $client -ReadyPattern 'Connected to server\. Local peer ID: \d+'
-    }
-    Write-Host 'Local test ready: one dedicated server and two windowed clients.'
-    Write-Host 'Use the printed stop command to close only this session.'
-    # Return handles for callers that want to inspect their own test session.
+    Write-JsonFile (Join-Path $sessionRoot 'latest-session.json') ([pscustomobject]@{ SessionFile = $sessionFile; SessionId = $sessionId })
+    Write-Host 'READY: production server and two windowed clients connected.'
+    Write-Host "Stop: powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\stop-local-test.ps1`" -SessionFile `"$sessionFile`""
     [pscustomobject]@{ LogDirectory = $logDirectory; SessionFile = $sessionFile; Instances = $startedProcesses }
-}
-catch {
+} catch {
+    $sessionError = $_.Exception.Message
+    $cleanupErrors = @()
     foreach ($instance in $startedProcesses) {
-        Write-Host "$($instance.Name): PID $($instance.Process.Id); log: $($instance.LogPath)"
+        try {
+            if (-not $instance.Process.HasExited) {
+                $instance.Process.Kill()
+                if (-not $instance.Process.WaitForExit(5000)) { throw 'Process did not stop.' }
+            }
+        } catch { $cleanupErrors += "$($instance.Name): $($_.Exception.Message)" }
     }
-    Write-Error "Local test startup failed: $($_.Exception.Message). Started processes are left running for inspection."
+    $sessionStatus = if ($cleanupErrors.Count) { 'failed-cleanup-incomplete' } else { 'failed-cleaned' }
+    if ($cleanupErrors.Count) { $sessionError += '; cleanup: ' + ($cleanupErrors -join '; ') }
+    if (Test-Path -LiteralPath $logDirectory) { Save-TestSession }
+    throw "Startup failed: $sessionError. Session/logs retained: $sessionFile"
 }

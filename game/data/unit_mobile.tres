@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="UnitDefinition" load_steps=3 format=3]
+[ext_resource type="Script" path="res://scripts/units/unit_definition.gd" id="1"]
+[ext_resource type="Resource" path="res://data/weapon_mobile.tres" id="2"]
+[resource]
+script = ExtResource("1")
+maximum_health = 100.0
+unit_type = 1
+hardened_speed = 8.0
+unhardened_speed = 3.0
+hardened_reverse_speed = 4.0
+unhardened_reverse_speed = 1.5
+turn_speed_degrees = 180.0
+weapon = ExtResource("2")

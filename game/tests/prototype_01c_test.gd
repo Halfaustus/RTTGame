@@ -78,7 +78,7 @@ func _simulation_checks() -> void:
 	assert(simulation.initialize_navigation())
 	for id: int in [3, 1, 2, 4]:
 		simulation.add_unit(UnitState.new(id, 42 if id != 4 else 99, CONFIG.spawn_position(id)))
-	var result := simulation.request_group_move([3, 1, 3, 999, 4, 2], 42, Vector3(4, 0, 100))
+	var result := simulation.request_group_move([3, 1, 3, 999, 4, 2], 42, Vector3(4, 0, 100), MovementSimulation.MoveMode.BASIC, Vector3.FORWARD)
 	assert(result["rejection"].is_empty())
 	assert(result["unit_ids"] == [1, 2, 3])
 	assert(simulation._targets.size() == 3 and not simulation._targets.has(4))
@@ -90,7 +90,7 @@ func _simulation_checks() -> void:
 	assert(simulation._targets == previous)
 	assert(simulation.request_group_move([4, 999], 42, Vector3(0, 0, 100))["rejection"] == "no owned units")
 	# Reordered input must produce identical ID-to-slot assignments.
-	simulation.request_group_move([2, 3, 1], 42, Vector3(4, 0, 100))
+	simulation.request_group_move([2, 3, 1], 42, Vector3(4, 0, 100), MovementSimulation.MoveMode.BASIC, Vector3.FORWARD)
 	assert(simulation._targets == previous)
 	for corner: Vector3 in [Vector3(-20, 0, 80), Vector3(60, 0, 120)]:
 		assert(simulation.request_group_move([1, 2, 3], 42, corner)["rejection"].is_empty())
@@ -117,7 +117,7 @@ func _simulation_checks() -> void:
 			ids.append(index + 1)
 			line_simulation.add_unit(UnitState.new(index + 1, 42, CONFIG.spawn_origin))
 		ids.reverse()
-		var line_result := line_simulation.request_group_move(ids, 42, Vector3(4, 0, 100))
+		var line_result := line_simulation.request_group_move(ids, 42, Vector3(4, 0, 100), MovementSimulation.MoveMode.BASIC, Vector3.FORWARD)
 		assert(line_result["rejection"].is_empty())
 		var sorted_ids: Array[int] = line_result["unit_ids"]
 		var targets := line_simulation.move_targets(sorted_ids)
@@ -197,6 +197,8 @@ func _run() -> void:
 		if not _simulation_passed:
 			quit(1)
 			return
+		# Keep this movement-only fixture's original player IDs and no combat targets.
+		_network._rebels_initialized = true
 		assert(_network.start_server(port))
 		return
 	assert(role in ["driver", "observer", "late"])
@@ -220,7 +222,7 @@ func _run() -> void:
 		# Mixed/duplicated/unordered IDs exercise the real server RPC validator.
 		var mixed_ids: Array[int] = [3, 1, 3, 999, 4, 2]
 		var own_ids: Array[int] = [1, 2, 3]
-		_network.request_moves(mixed_ids, Vector3(4, 0, 100))
+		_network.request_moves(mixed_ids, Vector3(4, 0, 100), MovementSimulation.MoveMode.BASIC, Vector3.FORWARD)
 		_network.request_moves(own_ids, Vector3(NAN, 0, 100))
 		_network.request_moves(own_ids, Vector3(999, 0, 100))
 	elif role == "observer":

@@ -7,6 +7,7 @@ const PICK_DISTANCE: float = 1000.0
 const DRAG_THRESHOLD: float = 8.0
 const SELECTION_RECTANGLE: Script = preload("res://scripts/core/selection_rectangle.gd")
 const MOVEMENT_PATH_VISUAL: Script = preload("res://scripts/core/movement_path_visual.gd")
+const SHOT_VISUAL: Script = preload("res://scripts/core/shot_visual.gd")
 
 var _visual_units: Dictionary[int, Node3D] = {}
 var _selected_units: Dictionary[int, Node3D] = {}
@@ -15,26 +16,64 @@ var _movement_paths: Dictionary[int, MeshInstance3D] = {}
 var _route_points: Dictionary[int, PackedVector3Array] = {}
 var _route_progress: Dictionary[int, int] = {}
 var _pending_actions: Array[Dictionary] = []
+var _right_pressed := false
+var _right_start: Vector2
+var _right_ground: Variant
+var _right_dragging := false
+var _right_mode := MovementSimulation.MoveMode.BASIC
+var _formation_preview: Node3D
 var _left_pressed: bool = false
 var _box_dragging: bool = false
 var _drag_start: Vector2
 var _selection_rectangle: Control
+var _dead_units: Dictionary[int, bool] = {}
+var _fast_move_armed: bool = false
+var _attack_move_armed: bool = false
+var _reverse_move_armed: bool = false
+var _movement_mode_hint: Label
 
 @onready var _units: Node3D = $Units
+@onready var _camera: Camera3D = $Units/Camera3D
 
 
 func _ready() -> void:
+	_camera.rotation_started.connect(_on_camera_rotation_started)
 	NetworkManager.unit_spawn_received.connect(_on_unit_spawn_received)
 	NetworkManager.unit_positions_received.connect(_on_unit_positions_received)
 	NetworkManager.unit_move_targets_received.connect(_on_unit_move_targets_received)
 	NetworkManager.unit_move_paths_received.connect(_on_unit_move_paths_received)
+	NetworkManager.unit_combat_state_received.connect(_on_unit_combat_state_received)
+	NetworkManager.combat_shot_received.connect(_on_combat_shot_received)
+	NetworkManager.unit_death_received.connect(_on_unit_death_received)
+	NetworkManager.unit_stops_received.connect(_on_unit_stops_received)
+	NetworkManager.unit_armament_received.connect(func(id: int, armed: bool):
+		if _visual_units.has(id):
+			_visual_units[id].armed = armed)
+	NetworkManager.unit_type_received.connect(_on_unit_type_received)
+	NetworkManager.unit_orientations_received.connect(_on_unit_orientations_received)
 	multiplayer.server_disconnected.connect(_clear_selection)
 	multiplayer.server_disconnected.connect(_clear_movement_paths)
+	multiplayer.server_disconnected.connect(_reset_replicated_units)
+	multiplayer.connected_to_server.connect(_reset_replicated_units)
 	var overlay := CanvasLayer.new()
 	add_child(overlay)
 	_selection_rectangle = SELECTION_RECTANGLE.new()
 	overlay.add_child(_selection_rectangle)
+	_movement_mode_hint = Label.new()
+	_movement_mode_hint.text = "快速移动：右键下令，F 取消"
+	_movement_mode_hint.position = Vector2(16, 16)
+	_movement_mode_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_movement_mode_hint.hide()
+	overlay.add_child(_movement_mode_hint)
 	get_window().focus_exited.connect(_cancel_drag)
+	get_window().focus_exited.connect(_cancel_fast_move)
+	get_window().focus_exited.connect(_cancel_attack_move)
+	get_window().focus_exited.connect(_cancel_reverse_move)
+	multiplayer.server_disconnected.connect(_cancel_reverse_move)
+	multiplayer.server_disconnected.connect(_cancel_attack_move)
+	multiplayer.server_disconnected.connect(_cancel_fast_move)
+	_formation_preview = Node3D.new()
+	add_child(_formation_preview)
 	set_physics_process(false)
 
 
@@ -43,12 +82,49 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return
-	if event is InputEventMouseMotion and _left_pressed:
+	_handle_world_input(event)
+
+
+func _handle_world_input(event: InputEvent) -> void:
+	# Called only after connection/role checks; kept separate for offline input checks.
+	if _camera.is_rotating():
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey:
+		if _is_reverse_move_key(event):
+			_arm_reverse_move()
+			get_viewport().set_input_as_handled()
+		elif _is_attack_move_key(event):
+			_arm_attack_move()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE and event.pressed and not event.echo \
+			and get_viewport().gui_get_focus_owner() == null:
+			_cancel_attack_move()
+			_cancel_fast_move()
+			_cancel_reverse_move()
+			_cancel_drag()
+			get_viewport().set_input_as_handled()
+		elif _is_fast_move_key(event):
+			_toggle_fast_move()
+			get_viewport().set_input_as_handled()
+		elif _is_stop_key(event):
+			_cancel_right_drag()
+			_queue_action({"type": "stop"})
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion and _right_pressed:
+		_right_dragging = _right_dragging or event.position.distance_to(_right_start) > DRAG_THRESHOLD
+		_update_formation_preview(event.position)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion and _left_pressed:
 		_update_drag(event.position)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
+		if get_viewport().gui_get_focus_owner() != null:
+			_cancel_right_drag()
+			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
+				_cancel_right_drag()
 				_left_pressed = true
 				_box_dragging = false
 				_drag_start = event.position
@@ -60,9 +136,21 @@ func _unhandled_input(event: InputEvent) -> void:
 					_queue_action({"type": "click", "position": event.position})
 				_cancel_drag()
 			get_viewport().set_input_as_handled()
-		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not _left_pressed:
-			_queue_action({"type": "move", "position": event.position})
+		elif event.button_index == MOUSE_BUTTON_RIGHT and not _left_pressed:
+			if event.pressed:
+				_right_pressed = true
+				_right_start = event.position
+				_right_ground = _ground_at(event.position)
+				_right_dragging = false
+				_right_mode = _current_move_mode()
+			elif _right_pressed:
+				_right_dragging = _right_dragging or event.position.distance_to(_right_start) > DRAG_THRESHOLD
+				_queue_action({"type": "move", "position": _right_start if _right_dragging else event.position, "end": event.position, "dragged": _right_dragging, "mode": _right_mode,
+					"ground": _right_ground if _right_dragging else _ground_at(event.position), "tip": _ground_at(event.position)})
+				_consume_move_mode()
+				_cancel_right_drag()
 			get_viewport().set_input_as_handled()
+
 
 
 func _update_drag(position: Vector2) -> void:
@@ -72,7 +160,105 @@ func _update_drag(position: Vector2) -> void:
 		_selection_rectangle.show_rectangle(Rect2(_drag_start, position - _drag_start).abs())
 
 
+func _is_stop_key(event: InputEventKey) -> bool:
+	return event.keycode == KEY_E and event.pressed and not event.echo \
+		and not event.ctrl_pressed and not event.alt_pressed and not event.meta_pressed \
+		and get_viewport().gui_get_focus_owner() == null
+
+
+func _on_camera_rotation_started() -> void:
+	_cancel_drag()
+	_pending_actions.clear()
+	set_physics_process(false)
+
+
+func _is_fast_move_key(event: InputEventKey) -> bool:
+	return event.keycode == KEY_F and event.pressed and not event.echo \
+		and not event.ctrl_pressed and not event.alt_pressed and not event.meta_pressed \
+		and get_viewport().gui_get_focus_owner() == null
+
+
+func _toggle_fast_move() -> void:
+	_cancel_right_drag()
+	_cancel_attack_move()
+	_cancel_reverse_move()
+	_fast_move_armed = not _fast_move_armed
+	_movement_mode_hint.text = "快速移动：右键下令，F 取消"
+	_movement_mode_hint.visible = _fast_move_armed
+
+
+func _cancel_fast_move() -> void:
+	_fast_move_armed = false
+	_movement_mode_hint.hide()
+
+
+func _current_move_mode() -> int:
+	var mode := MovementSimulation.MoveMode.FAST if _fast_move_armed else MovementSimulation.MoveMode.BASIC
+	if _attack_move_armed:
+		mode = MovementSimulation.MoveMode.ATTACK
+	if _reverse_move_armed:
+		mode = MovementSimulation.MoveMode.REVERSE
+	return mode
+
+
+func _consume_move_mode() -> int:
+	var mode := _current_move_mode()
+	_cancel_attack_move()
+	_cancel_fast_move()
+	_cancel_reverse_move()
+	return mode
+
+
+func _is_attack_move_key(event: InputEventKey) -> bool:
+	return event.keycode == KEY_Q and event.pressed and not event.echo \
+		and not event.ctrl_pressed and not event.alt_pressed and not event.meta_pressed \
+		and get_viewport().gui_get_focus_owner() == null
+
+
+func _cancel_attack_move() -> void:
+	_attack_move_armed = false
+	if not _fast_move_armed:
+		_movement_mode_hint.hide()
+
+
+func _arm_attack_move() -> void:
+	_cancel_fast_move()
+	_cancel_reverse_move()
+	_cancel_drag()
+	_attack_move_armed = true
+	_movement_mode_hint.text = "攻击移动：右键下令，Esc 取消"
+	_movement_mode_hint.show()
+
+
+func _is_reverse_move_key(event: InputEventKey) -> bool:
+	return event.keycode == KEY_R and event.pressed and not event.echo \
+		and not event.ctrl_pressed and not event.alt_pressed and not event.meta_pressed \
+		and get_viewport().gui_get_focus_owner() == null
+
+
+func _arm_reverse_move() -> void:
+	_cancel_fast_move()
+	_cancel_attack_move()
+	_cancel_drag()
+	_reverse_move_armed = true
+	_movement_mode_hint.text = "倒车：右键下令，Esc 取消"
+	_movement_mode_hint.show()
+
+
+func _cancel_reverse_move() -> void:
+	_reverse_move_armed = false
+	if not _fast_move_armed and not _attack_move_armed:
+		_movement_mode_hint.hide()
+
+
+func _on_unit_orientations_received(unit_ids: Array[int], yaws: Array[float]) -> void:
+	for index: int in unit_ids.size():
+		if _visual_units.has(unit_ids[index]):
+			_visual_units[unit_ids[index]].display_yaw(yaws[index])
+
+
 func _cancel_drag() -> void:
+	_cancel_right_drag()
 	_left_pressed = false
 	_box_dragging = false
 	_selection_rectangle.hide()
@@ -92,7 +278,9 @@ func _physics_process(_delta: float) -> void:
 			"box":
 				_select_box(action["rectangle"])
 			"move":
-				_request_move_at(action["position"])
+				_request_move_at(action["position"], action.get("mode", MovementSimulation.MoveMode.BASIC), action.get("end", action["position"]), action.get("dragged", false), action.get("ground"), action.get("tip"))
+			"stop":
+				_request_stop_selected()
 	_pending_actions.clear()
 	set_physics_process(false)
 
@@ -163,8 +351,23 @@ func _clear_selection() -> void:
 	_select_unit(null)
 
 
+func _reset_replicated_units() -> void:
+	# A connection starts with a complete live snapshot, never the previous session's visuals.
+	_clear_selection()
+	_clear_movement_paths()
+	for id: int in _visual_units:
+		var unit := _visual_units[id]
+		var removed := _on_visual_unit_removed.bind(id)
+		if unit.tree_exiting.is_connected(removed):
+			unit.tree_exiting.disconnect(removed)
+		unit.hide()
+		unit.queue_free()
+	_visual_units.clear()
+	_dead_units.clear()
+
+
 func _on_unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3) -> void:
-	if _visual_units.has(unit_id):
+	if _visual_units.has(unit_id) or _dead_units.has(unit_id):
 		return
 
 	var unit := UNIT_SCENE.instantiate() as Node3D
@@ -176,6 +379,31 @@ func _on_unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3
 	unit.tree_exiting.connect(_on_visual_unit_removed.bind(unit_id))
 
 
+func _on_unit_combat_state_received(unit_id: int, team_id: int, maximum_health: float, health: float) -> void:
+	if _visual_units.has(unit_id):
+		_visual_units[unit_id].display_combat_state(team_id, maximum_health, health)
+
+
+func _on_unit_type_received(unit_id: int, unit_type: int) -> void:
+	if _visual_units.has(unit_id):
+		_visual_units[unit_id].display_unit_type(unit_type)
+
+
+func _on_combat_shot_received(start: Vector3, end: Vector3) -> void:
+	var visual := SHOT_VISUAL.new() as MeshInstance3D
+	add_child(visual)
+	visual.show_shot(_units.transform * start, _units.transform * end)
+
+
+func _on_unit_death_received(unit_id: int) -> void:
+	_dead_units[unit_id] = true
+	var unit: Node3D = _visual_units.get(unit_id)
+	_on_visual_unit_removed(unit_id)
+	if is_instance_valid(unit):
+		unit.hide()
+		unit.queue_free()
+
+
 func _on_visual_unit_removed(unit_id: int) -> void:
 	_clear_unit_path(unit_id)
 	if _selected_units.has(unit_id) and is_instance_valid(_selected_units[unit_id]):
@@ -184,24 +412,75 @@ func _on_visual_unit_removed(unit_id: int) -> void:
 	_visual_units.erase(unit_id)
 
 
-func _request_move_at(screen_position: Vector2) -> void:
-	_prune_selection()
-	if _selected_units.is_empty():
-		return
+func _ground_at(screen_position: Vector2) -> Variant:
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
+		return null
+	return Plane(Vector3.UP, MOVEMENT_CONFIG.ground_height).intersects_ray(camera.project_ray_origin(screen_position), camera.project_ray_normal(screen_position))
+
+
+func _request_move_at(screen_position: Vector2, mode: int = MovementSimulation.MoveMode.BASIC, end: Vector2 = Vector2.ZERO, dragged: bool = false, ground: Variant = null, tip: Variant = null) -> void:
+	_prune_selection()
+	var hit: Variant = ground if ground is Vector3 else _ground_at(screen_position)
+	if not hit is Vector3:
 		return
-	var ground := Plane(Vector3.UP, MOVEMENT_CONFIG.ground_height)
-	var hit: Variant = ground.intersects_ray(
-		camera.project_ray_origin(screen_position), camera.project_ray_normal(screen_position)
-	)
-	if hit is Vector3:
-		var unit_ids: Array[int] = []
-		for unit_id: int in _selected_units:
-			if _selected_units[unit_id].owner_peer_id == multiplayer.get_unique_id():
-				unit_ids.append(unit_id)
-		if not unit_ids.is_empty():
-			NetworkManager.request_moves(unit_ids, hit)
+	var facing := Vector3.ZERO
+	if dragged:
+		var end_hit: Variant = tip if tip is Vector3 else _ground_at(end)
+		if not end_hit is Vector3 or (end_hit - hit).is_zero_approx():
+			return
+		facing = (end_hit - hit).normalized()
+	# Send the owned living selection; the server filters command eligibility.
+	var ids := _command_unit_ids(MovementSimulation.MoveMode.BASIC)
+	if not ids.is_empty():
+		NetworkManager.request_moves(ids, hit, mode, facing)
+
+
+func _command_unit_ids(mode: int) -> Array[int]:
+	var ids: Array[int] = []
+	for id: int in _selected_units:
+		var unit := _selected_units[id]
+		if unit.owner_peer_id != multiplayer.get_unique_id() or unit.health <= 0:
+			continue
+		if mode == MovementSimulation.MoveMode.REVERSE and unit.unit_type != UnitDefinition.UnitType.ARMORED_VEHICLE:
+			continue
+		if mode == MovementSimulation.MoveMode.ATTACK and not unit.armed:
+			continue
+		ids.append(id)
+	ids.sort()
+	return ids
+
+
+func _cancel_right_drag() -> void:
+	_right_pressed = false
+	_right_dragging = false
+	_right_ground = null
+	if _formation_preview != null:
+		for child: Node in _formation_preview.get_children():
+			child.queue_free()
+			child.hide()
+
+
+func _update_formation_preview(end: Vector2) -> void:
+	for child: Node in _formation_preview.get_children():
+		child.queue_free()
+		child.hide()
+	if not _right_dragging:
+		return
+	_prune_selection()
+	var ids := _command_unit_ids(_right_mode)
+	var center: Variant = _right_ground
+	var tip: Variant = _ground_at(end)
+	if ids.is_empty() or not center is Vector3 or not tip is Vector3:
+		return
+	var forward: Vector3 = (tip - center).normalized()
+	var side := forward.cross(Vector3.UP)
+	var spacing := MOVEMENT_CONFIG.unit_width + MOVEMENT_CONFIG.destination_gap
+	for i: int in ids.size():
+		var slot: Vector3 = center + side * (i - (ids.size() - 1) * 0.5) * spacing + Vector3.UP * 0.08
+		var arrow := MOVEMENT_PATH_VISUAL.new() as MeshInstance3D
+		_formation_preview.add_child(arrow)
+		arrow.update_route(PackedVector3Array([slot - side * 0.35, slot + side * 0.35, slot, slot + forward, slot + forward * 0.7 + side * 0.2, slot + forward, slot + forward * 0.7 - side * 0.2]))
 
 
 func _on_unit_positions_received(unit_ids: Array[int], positions: Array[Vector3]) -> void:
@@ -209,6 +488,27 @@ func _on_unit_positions_received(unit_ids: Array[int], positions: Array[Vector3]
 		if _visual_units.has(unit_ids[index]):
 			_visual_units[unit_ids[index]].position = positions[index]
 			_update_unit_path(unit_ids[index])
+
+
+func _request_stop_selected() -> void:
+	_prune_selection()
+	var unit_ids: Array[int] = []
+	for unit_id: int in _selected_units:
+		if _selected_units[unit_id].owner_peer_id == multiplayer.get_unique_id():
+			unit_ids.append(unit_id)
+	if not unit_ids.is_empty():
+		NetworkManager.request_stops(unit_ids)
+
+
+func _on_unit_stops_received(unit_ids: Array[int], positions: Array[Vector3]) -> void:
+	for index: int in unit_ids.size():
+		var unit_id := unit_ids[index]
+		if not _visual_units.has(unit_id):
+			continue
+		var unit := _visual_units[unit_id]
+		unit.position = positions[index]
+		if unit.owner_peer_id == multiplayer.get_unique_id():
+			_clear_unit_path(unit_id)
 
 
 func _on_unit_move_targets_received(unit_ids: Array[int], positions: Array[Vector3]) -> void:

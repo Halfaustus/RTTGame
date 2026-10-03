@@ -4,6 +4,8 @@ extends RefCounted
 const POSITION_EPSILON: float = 0.00001
 
 var _grid := AStarGrid2D.new()
+var _routes := preload("res://scripts/movement/route_cost_grid.gd").new()
+var surface: TerrainSurface
 var _config: MovementConfig
 var _blocked: Array[Rect2] = []
 var _clearance: float
@@ -13,6 +15,11 @@ var _initialized: bool = false
 func initialize(config: MovementConfig, definition: PrototypeMapDefinition) -> bool:
 	_initialized = false
 	_config = config
+	surface = TerrainSurface.new(definition)
+	_routes.surface = surface
+	_routes.configure_costs(null, false, config.speed)
+	_routes.clear()
+	_routes._edge_costs.clear()
 	if config.navigation_cell_size <= 0.0 or config.maximum_xz.x <= config.minimum_xz.x \
 		or config.maximum_xz.y <= config.minimum_xz.y:
 		return false
@@ -32,8 +39,38 @@ func initialize(config: MovementConfig, definition: PrototypeMapDefinition) -> b
 			var id := Vector2i(x, z)
 			var point := _grid.get_point_position(id)
 			_grid.set_point_solid(id, not is_position_walkable(Vector3(point.x, 0.0, point.y)))
+	_build_route_connections()
 	_initialized = true
 	return true
+
+
+func _cell_index(cell: Vector2i) -> int:
+	return cell.y * _grid.region.size.x + cell.x
+
+
+func _build_route_connections() -> void:
+	# Reuse the occupancy grid, but connect all start/end anchors into one A* query.
+	_routes.static_point_count = _grid.region.size.x * _grid.region.size.y
+	for x: int in _grid.region.size.x:
+		for z: int in _grid.region.size.y:
+			var cell := Vector2i(x, z)
+			if not _grid.is_point_solid(cell):
+				_routes.add_point(_cell_index(cell), _grid.get_point_position(cell))
+	var directions: Array[Vector2i] = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1), Vector2i(-1, 1)]
+	for x: int in _grid.region.size.x:
+		for z: int in _grid.region.size.y:
+			var cell := Vector2i(x, z)
+			if _grid.is_point_solid(cell):
+				continue
+			for direction: Vector2i in directions:
+				var next := cell + direction
+				if not _grid.is_in_boundsv(next) or _grid.is_point_solid(next):
+					continue
+				if direction.x != 0 and direction.y != 0:
+					if _grid.is_point_solid(cell + Vector2i(direction.x, 0)) or _grid.is_point_solid(cell + Vector2i(0, direction.y)):
+						continue
+				if segment_is_walkable(_point(cell, 0.0), _point(next, 0.0)):
+					_routes.connect_points(_cell_index(cell), _cell_index(next))
 
 
 func is_ready() -> bool:
@@ -131,51 +168,80 @@ func _slot_available(position: Vector3, reserved: Array[Vector3], separation: fl
 	return true
 
 
-func find_path(start: Vector3, destination: Vector3, reserved: Array[Vector3] = [], separation: float = 0.0) -> PackedVector3Array:
+func find_path(start: Vector3, destination: Vector3, reserved: Array[Vector3] = [], separation: float = 0.0, fast: bool = false, unit: UnitState = null) -> PackedVector3Array:
 	if not _initialized or not is_position_walkable(start):
 		return PackedVector3Array()
 	if is_position_walkable(destination) and _slot_available(destination, reserved, separation):
 		# A valid but disconnected destination is not replaced by a distant partial route.
-		return _path_to_exact_point(start, destination)
+		return _path_to_exact_point(start, destination, fast, unit)
 	for id: Vector2i in _candidate_cells(destination, _config.target_search_radius, start):
 		var candidate := _point(id, start.y)
 		if not _slot_available(candidate, reserved, separation):
 			continue
-		var path := _path_to_exact_point(start, candidate)
+		var path := _path_to_exact_point(start, candidate, fast, unit)
 		if not path.is_empty():
 			return path
 	return PackedVector3Array()
 
 
-func _path_to_exact_point(start: Vector3, destination: Vector3) -> PackedVector3Array:
-	if segment_is_walkable(start, destination):
+func _path_to_exact_point(start: Vector3, destination: Vector3, fast: bool = false, unit: UnitState = null) -> PackedVector3Array:
+	var time_cost := fast and unit != null and not is_equal_approx(unit.speed_on(true, _config.speed), unit.speed_on(false, _config.speed))
+	_routes.configure_costs(unit, time_cost, _config.speed)
+	if not time_cost and segment_is_walkable(start, destination):
 		return PackedVector3Array([start, destination])
+	var best := PackedVector3Array()
+	var best_cost := INF
+	if segment_is_walkable(start, destination):
+		best = PackedVector3Array([start, destination])
+		best_cost = path_cost(best, time_cost, unit)
 	var anchor_radius := _config.navigation_cell_size * sqrt(2.0)
 	var start_cells := _candidate_cells(start, anchor_radius, start)
 	var end_cells := _candidate_cells(destination, anchor_radius, destination)
-	for start_id: Vector2i in start_cells:
-		if not segment_is_walkable(start, _point(start_id, start.y)):
-			continue
-		for end_id: Vector2i in end_cells:
-			if not segment_is_walkable(_point(end_id, start.y), destination):
-				continue
-			var ids := _grid.get_id_path(start_id, end_id, false)
-			if ids.is_empty():
-				continue
-			var points := PackedVector3Array([start])
-			for id: Vector2i in ids:
-				points.append(_point(id, start.y))
-			points.append(destination)
-			return _simplify(points)
-	return PackedVector3Array()
+	var start_index: int = _routes.static_point_count
+	var end_index := start_index + 1
+	_routes.add_point(start_index, Vector2(start.x, start.z))
+	_routes.add_point(end_index, Vector2(destination.x, destination.z))
+	for cell: Vector2i in start_cells:
+		if segment_is_walkable(start, _point(cell, start.y)):
+			_routes.connect_points(start_index, _cell_index(cell))
+	for cell: Vector2i in end_cells:
+		if segment_is_walkable(_point(cell, start.y), destination):
+			_routes.connect_points(_cell_index(cell), end_index)
+	var ids := _routes.get_id_path(start_index, end_index, false)
+	if not ids.is_empty():
+		var points := PackedVector3Array()
+		for id: int in ids:
+			var point := _routes.get_point_position(id)
+			points.append(Vector3(point.x, start.y, point.y))
+		var simplified := _simplify(points, time_cost, unit)
+		if not simplified.is_empty() and path_cost(simplified, time_cost, unit) < best_cost - 0.000001:
+			best = simplified
+	_routes.remove_point(start_index)
+	_routes.remove_point(end_index)
+	return best
 
 
-func _simplify(points: PackedVector3Array) -> PackedVector3Array:
+func path_cost(points: PackedVector3Array, time_cost: bool, unit: UnitState = null) -> float:
+	var cost := 0.0
+	for index: int in points.size() - 1:
+		cost += surface.segment_time(points[index], points[index + 1], unit, _config.speed) if time_cost else points[index].distance_to(points[index + 1])
+	return cost
+
+
+func _simplify(points: PackedVector3Array, time_cost: bool = false, unit: UnitState = null) -> PackedVector3Array:
+	var cumulative: Array[float] = [0.0]
+	for point_index: int in points.size() - 1:
+		var cost := surface.segment_time(points[point_index], points[point_index + 1], unit, _config.speed) if time_cost else points[point_index].distance_to(points[point_index + 1])
+		cumulative.append(cumulative[-1] + cost)
 	var simplified := PackedVector3Array([points[0]])
 	var index := 0
 	while index < points.size() - 1:
 		var next := points.size() - 1
-		while next > index + 1 and not segment_is_walkable(points[index], points[next]):
+		while next > index + 1:
+			if segment_is_walkable(points[index], points[next]):
+				var shortcut := surface.segment_time(points[index], points[next], unit, _config.speed) if time_cost else points[index].distance_to(points[next])
+				if shortcut <= cumulative[next] - cumulative[index] + 0.000001:
+					break
 			next -= 1
 		if not segment_is_walkable(points[index], points[next]):
 			return PackedVector3Array()
