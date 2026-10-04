@@ -8,14 +8,28 @@
 - Within project documents, applicable development constraints take precedence over the design baseline. If they conflict, obey the constraints and report the conflict and impact. This does not permit inserting game design into constraints to override the baseline. Explicit user instructions govern the authorized task.
 - Record the provenance, scope, limits and stage of autonomous choices. Distinguish formal values, explicitly authorized test configuration, temporary parameters and implementation details. Missing original authorization must be marked as not found; code existence, test success and handoff prose are not approval.
 - The baseline's test-instance authorization does not authorize development during a pause, changing its framework or known formal values, or retroactively approving earlier decisions. Do not promote temporary values to formal design without explicit authorization.
-- Do not discard unique project content removed during cleanup or silently migrate it into the baseline. Record its source and disposition for user review. Audit details: docs/DEVELOPMENT_CONSTRAINT_REVIEW.md and docs/AUTONOMOUS_DESIGN_REVIEW.md.
+- When a constraint contains a still-effective game-design decision, removing it from this file does not revoke that decision. If the user explicitly authorizes writing it into the baseline, do so and report the result. Otherwise report the decision and its current source, retain it as a current unresolved item, and request only the missing disposition when necessary. Do not implement the opposite behavior or classify an active rule as disposable history. A newer explicit user decision may supersede it.
 
-## Handoff maintenance
+## Autonomous design authorization review maintenance
 
-- Keep docs/HANDOFF.md as the current handoff summary: actual baseline and stage, completion and key verification conclusions, active limitations and blockers, next step and authorization boundary, and links to detailed records.
-- Update the relevant current summary each round instead of appending long historical discussions, tables or logs. Judge size by whether a new agent can quickly identify the current state and authorized next step; do not impose a mechanical word limit.
-- Reuse existing topic records for constraint reviews, conformity checks, authorization inventories and stage evidence. Before removing unique uncommitted detail from HANDOFF, migrate it into the appropriate record and verify preservation. Committed history may be traced through Git; do not assume uncommitted information is recoverable that way.
-- Remove resolved issues from the current summary while preserving worthwhile historical evidence separately. Documentation checks do not constitute gameplay or manual acceptance.
+docs/AUTONOMOUS_DESIGN_REVIEW.md是独立的自主设计授权人工复核清单。
+
+每当用户明确声明允许Codex自主设计时，必须自动更新清单，记录该次授权的来源、范围、限制及已作出的决定。授权时尚未作出决定的，注明尚未设计；同一次授权任务内实际作出的决定在任务交付时补齐。
+
+除用户明确授权的清单维护任务外，没有新的明确自主设计授权时，不得新增、修改、删除、整理、归档或自动刷新该清单。既有授权的持续沿用、基线更新、实现变更、测试通过、普通交接和用户未反对，均不是清单更新触发条件。
+
+该清单仅供用户人工复核，不是设计基线、开发指令、执行授权来源或自动验收依据。清单中的记录不使临时设计自动正式化，也不解除暂停或扩大开发范围。
+
+清单正文独立存在，不并入基线、HANDOFF或其他文件。检查任务可以读取，但在没有更新授权时不得操作。
+
+## Current documents and history
+
+- docs/DESIGN_BASELINE.md and docs/HANDOFF.md are current-state documents. Neither file is required or permitted to accumulate historical records: do not keep change logs, superseded rules, resolved-conflict histories, per-stage result ledgers, past handoff narratives or chronological work logs in them.
+- Keep the baseline limited to current effective design, explicit pending decisions and unresolved conflicts. Replace superseded wording directly; remove resolved conflict entries after updating the effective rules. Keep its current identifier and applicable metadata without appending a version history.
+- Keep HANDOFF limited to current implementation status, key verification conclusions, active limitations and blockers, current authorization boundaries, the authorized next step and necessary links. Remove resolved or superseded entries instead of adding another historical paragraph. Current unverified acceptance items are active status and must remain visible.
+- No separate preservation of removed history is required: do not create or update history files, append archives, or migrate old narratives merely to retain them. Historical logs, superseded rules and resolved issues may be removed from these two current-state documents without another archival step. Existing Git history needs no additional copy.
+- This cleanup does not authorize deleting separate files, frozen fixtures, source code or unrelated project data. Current effective rules, unresolved authorization evidence, active blockers and unverified acceptance obligations are not historical clutter; retain the information needed for current decisions.
+- Update current summaries each round and keep them easy for a new agent to read; do not impose a mechanical word limit. Documentation checks do not constitute gameplay or manual acceptance.
 
 ## Project
 
@@ -158,7 +172,7 @@ Systems expected to scale with unit count should be designed with profiling and 
 - Preserve existing results, interfaces and uncommitted work. Report incompatible design changes before changing code, configuration or tests; a documentation audit does not authorize implementation repair.
 - Preserve authenticated ownership and private-state boundaries. Do not use connection identities as substitutes for domain identities or expose private state through unrelated replication or replay channels.
 - When changing execution order or compatibility-sensitive interfaces, establish the existing contract and verify the affected frozen replay boundaries. Do not silently change those contracts.
-- Historical acceptance criteria and unique project decisions removed from constraints remain review items in docs/DEVELOPMENT_CONSTRAINT_REVIEW.md; removal does not authorize deleting their implementation or treating them as newly approved design.
+- Only still-effective acceptance obligations and unresolved project decisions remain current review items. Completed, superseded or resolved records do not require archival retention. Removing text does not by itself authorize deleting code, fixtures or changing the corresponding game behavior.
 
 ## Replay compatibility
 

@@ -218,15 +218,22 @@ func is_position_walkable(position: Vector3) -> bool:
 	_count("passability_queries")
 	if _config == null or not position.is_finite():
 		return false
-	var point := Vector2(position.x, position.z)
 	if not _dynamic_clear(position): return false
+	return static_position_walkable(position, _config, _blocked, _clearance)
+
+
+# Shared exact static predicate; footprint is derived from existing movement data.
+static func static_position_walkable(position: Vector3, config: MovementConfig, obstacles: Array[Rect2], footprint: float) -> bool:
+	if config == null or not position.is_finite() or not is_finite(footprint) or footprint < 0: return false
+	var point := Vector2(position.x, position.z)
 	# Vector3 stores float32 values; tolerate rounding at an inset map boundary.
-	if point.x < _config.minimum_xz.x + _clearance - POSITION_EPSILON or point.x > _config.maximum_xz.x - _clearance + POSITION_EPSILON \
-		or point.y < _config.minimum_xz.y + _clearance - POSITION_EPSILON or point.y > _config.maximum_xz.y - _clearance + POSITION_EPSILON:
+	if point.x < config.minimum_xz.x + footprint - POSITION_EPSILON or point.x > config.maximum_xz.x - footprint + POSITION_EPSILON \
+		or point.y < config.minimum_xz.y + footprint - POSITION_EPSILON or point.y > config.maximum_xz.y - footprint + POSITION_EPSILON:
 		return false
-	for obstacle: Rect2 in _blocked:
-		var nearest := Vector2(clampf(point.x,obstacle.position.x,obstacle.end.x),clampf(point.y,obstacle.position.y,obstacle.end.y))
-		if point.distance_to(nearest) <= _clearance:
+	for obstacle: Rect2 in obstacles:
+		var rectangle := obstacle.abs()
+		var nearest := Vector2(clampf(point.x,rectangle.position.x,rectangle.end.x),clampf(point.y,rectangle.position.y,rectangle.end.y))
+		if point.distance_to(nearest) <= footprint:
 			return false
 	return true
 

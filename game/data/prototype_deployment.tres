@@ -9,19 +9,19 @@
 script = ExtResource("1")
 temporary_test_values = true
 catalog = Array[Dictionary]([{
-"config_id": "test.armored", "category": "armored_vehicle", "definition": ExtResource("2"),
+"config_id": "test.armored", "definition": ExtResource("2"),
 "value_points": 500, "sortie_points": 300, "maximum_present": 4, "width": 1.0
 }, {
-"config_id": "test.rifle", "category": "infantry", "definition": ExtResource("3"),
+"config_id": "test.rifle", "definition": ExtResource("3"),
 "value_points": 200, "sortie_points": 150, "maximum_present": 6, "width": 1.0
 }, {
-"config_id": "test.unarmed", "category": "infantry", "definition": ExtResource("4"),
+"config_id": "test.unarmed", "definition": ExtResource("4"),
 "value_points": 50, "sortie_points": 40, "maximum_present": 8, "width": 1.0
 }])
 points = Array[Dictionary]([{
 "point_id": "ground.west", "position": Vector3(-12, 0.5, 112), "yaw": 0.0,
-"entry_kind": "ground", "allowed_factions": [1], "allowed_categories": []
+"entry_kind": "ground", "allowed_factions": [1]
 }, {
 "point_id": "ground.east", "position": Vector3(12, 0.5, 112), "yaw": 0.0,
-"entry_kind": "ground", "allowed_factions": [1], "allowed_categories": []
+"entry_kind": "ground", "allowed_factions": [1]
 }])

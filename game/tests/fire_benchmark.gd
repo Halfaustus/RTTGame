@@ -16,7 +16,7 @@ func run() -> void:
 			var weapons := 0
 			for id: int in count:
 				var state := UnitState.new(id+1,42,Vector3(id,0,0))
-				state.configure(1,catalog.squad(true) if id%2 == 0 else catalog.vehicle("c"))
+				state.configure(1,catalog.squad(true) if id%2 == 0 else catalog.weapon_slot_fixture("c"))
 				scene.units[state.unit_id] = state
 				weapons += state.runtime_weapons.size()
 				for instance: RuntimeWeaponInstance in state.runtime_weapons: instance.bind_target(AttackTarget.unit(target))

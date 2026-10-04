@@ -69,12 +69,12 @@ func run() -> void:
 	another.runtime_weapons[0].inventory.recoilless_ap = 0
 	check(assault.runtime_weapons[0].inventory.recoilless_ap == 4,"independent inventory")
 	for model: String in ["a","b","c"]:
-		var vehicle := unit(catalog.vehicle(model))
+		var vehicle := unit(catalog.weapon_slot_fixture(model))
 		check(vehicle.mounts.size() == 2 and vehicle.runtime_weapons.size() == (4 if model == "c" else 3),model+" weapon mount counts")
 		check(vehicle.runtime_weapons[1].definition.capacity == 450 and vehicle.runtime_weapons[1].inventory.standard == 2250,model+" vehicle MG stock")
 		check(vehicle.runtime_weapons[0].spatial_node() == vehicle.mounts[0] and vehicle.runtime_weapons[2].spatial_node() == vehicle.mounts[1],model+" spatial ownership")
-		check(vehicle.definition.turn_speed_degrees == (100 if model == "c" else 60),model+" hull rotation speed")
-	var vehicle := unit(catalog.vehicle("c"))
+		check(vehicle.definition.resource_name == "isolated_weapon_slot_fixture", "independent weapon fixture, no retired vehicle identity")
+	var vehicle := unit(catalog.weapon_slot_fixture("c"))
 	var main := vehicle.runtime_weapons[0]
 	var coax := vehicle.runtime_weapons[1]
 	var commander := vehicle.runtime_weapons[2]
@@ -205,7 +205,7 @@ func integration() -> void:
 	network.timeline.enter_phase("replication")
 	network.timeline.finish_tick()
 	check(not network.bind_weapon_target(99,order.unit_id,network._authoritative_units[order.unit_id].runtime_weapons[0].instance_id,1),"owner validation")
-	check(network.bind_weapon_target(42,order.unit_id,network._authoritative_units[order.unit_id].runtime_weapons[0].instance_id,1),"authorized target")
+	check(not network.bind_weapon_target(42,order.unit_id,network._authoritative_units[order.unit_id].runtime_weapons[0].instance_id,1),"owner cannot bind an unobserved enemy")
 	var hp: float = network._authoritative_units[1].health
 	for frame: int in 240: network._run_server_tick(PackedInt32Array([42]))
 	check(network._authoritative_units[1].health == hp,"no production legacy firing")
@@ -227,7 +227,7 @@ func benchmark() -> void:
 		var weapons := 0
 		for id: int in count:
 			var state := UnitState.new(id+1,42,Vector3(id,0,0))
-			state.configure(1,catalog.squad(true) if id%2 == 0 else catalog.vehicle("c"))
+			state.configure(1,catalog.squad(true) if id%2 == 0 else catalog.weapon_slot_fixture("c"))
 			scene.units[state.unit_id] = state
 			weapons += state.runtime_weapons.size()
 			for instance: RuntimeWeaponInstance in state.runtime_weapons: instance.bind_target(AttackTarget.unit(victim))
@@ -249,7 +249,7 @@ func additional_checks() -> void:
 	simulation.clear_path = func(_a,_b): return true
 	simulation.moving = func(_id): return false
 	var vehicle := UnitState.new(5000,42,Vector3(10,0.5,100))
-	vehicle.configure(1,catalog.vehicle("c"))
+	vehicle.configure(1,catalog.weapon_slot_fixture("c"))
 	var target := UnitState.new(5001,0,Vector3(10,0.5,90))
 	target.configure(2,UnitDefinition.new())
 	simulation.units = {5000:vehicle,5001:target}
@@ -264,7 +264,7 @@ func additional_checks() -> void:
 	movement.attack_facing_requests = simulation.hull_requests()
 	var start_yaw := vehicle.yaw
 	movement.advance(0.1)
-	check(is_equal_approx(absf(wrapf(vehicle.yaw-start_yaw,-PI,PI)),deg_to_rad(10)),"C idle Hull attack request 100 degrees per second")
+	check(is_equal_approx(absf(wrapf(vehicle.yaw-start_yaw,-PI,PI)),deg_to_rad(vehicle.definition.turn_speed_degrees*0.1)),"isolated fixture Hull rotation follows explicit definition")
 	check(movement.request_move(5000,42,Vector3(10,0,110)).is_empty(),"normal move accepted")
 	var position := vehicle.position
 	vehicle.yaw = 0
@@ -328,7 +328,7 @@ func additional_checks() -> void:
 	check(explicit.runtime_weapons.size() == 1,"all explicit old slots join common runtime factory")
 	explicit.runtime_weapons[0].bind_target(AttackTarget.unit(vehicle))
 	check(simulation.eligibility(explicit.runtime_weapons[0]) == "configuration_missing","unknown aim never completes as zero seconds")
-	check(catalog.vehicle("a").unhardened_reverse_speed == 1.25 and catalog.vehicle("c").unhardened_reverse_speed == 1.6,"formal ten percent reverse speed")
+	check(catalog.weapon_slot_fixture("a").ability_tags.is_empty(),"slot fixture has no removed vehicle capabilities")
 	var normal := catalog.squad(true)
 	check(normal.protection_kinetic == 6 and normal.protection_chemical == 6,"uniform motorized squad protection")
 	simulation.units[5001] = target

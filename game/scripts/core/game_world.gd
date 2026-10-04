@@ -126,6 +126,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_world_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.keycode == KEY_ESCAPE and event.pressed and not event.echo:
+		_open_menu()
+		get_viewport().set_input_as_handled()
+		return
 	if _deployment_ui != null and not _camera.is_rotating() and _deployment_ui.handle_world_input(event):
 		get_viewport().set_input_as_handled()
 		return
@@ -143,19 +147,17 @@ func _handle_world_input(event: InputEvent) -> void:
 		elif _is_attack_move_key(event):
 			_arm_attack_move()
 			get_viewport().set_input_as_handled()
-		elif event.keycode == KEY_ESCAPE and event.pressed and not event.echo \
-			and get_viewport().gui_get_focus_owner() == null:
-			_cancel_attack_move()
-			_cancel_fast_move()
-			_cancel_reverse_move()
-			_cancel_drag()
-			get_viewport().set_input_as_handled()
 		elif _is_fast_move_key(event):
 			_toggle_fast_move()
 			get_viewport().set_input_as_handled()
 		elif _is_stop_key(event):
-			_cancel_right_drag()
-			_queue_action({"type": "stop"})
+			if _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed or _left_pressed or _box_dragging:
+				_consume_move_mode()
+				_cancel_right_drag()
+				_cancel_drag()
+			else:
+				_pending_actions.clear()
+				_queue_action({"type": "stop"})
 			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseMotion and _right_pressed:
 		_right_dragging = _right_dragging or event.position.distance_to(_right_start) > DRAG_THRESHOLD
@@ -169,6 +171,12 @@ func _handle_world_input(event: InputEvent) -> void:
 			_cancel_right_drag()
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
+			if _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed:
+				_consume_move_mode()
+				_cancel_right_drag()
+				_cancel_drag()
+				get_viewport().set_input_as_handled()
+				return
 			if event.pressed:
 				_cancel_right_drag()
 				_left_pressed = true
@@ -199,6 +207,21 @@ func _handle_world_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
+
+func _open_menu() -> void:
+	# Presentation-only menu; never pauses simulation or cancels a command.
+	var parent := _selection_rectangle.get_parent()
+	var menu := parent.get_node_or_null("GameMenu") as PanelContainer
+	if menu == null:
+		menu = PanelContainer.new()
+		menu.name = "GameMenu"
+		parent.add_child(menu)
+		menu.position = Vector2(24,24)
+		var resume := Button.new()
+		resume.text = "返回游戏"
+		menu.add_child(resume)
+		resume.pressed.connect(func(): menu.hide(); resume.release_focus())
+	menu.show()
 
 func _update_drag(position: Vector2) -> void:
 	if position.distance_to(_drag_start) > DRAG_THRESHOLD:
@@ -273,7 +296,7 @@ func _arm_attack_move() -> void:
 	_cancel_reverse_move()
 	_cancel_drag()
 	_attack_move_armed = true
-	_movement_mode_hint.text = "攻击移动：右键下令，Esc 取消"
+	_movement_mode_hint.text = "攻击移动：右键下令，E 或左键退出"
 	_movement_mode_hint.show()
 
 
@@ -288,7 +311,7 @@ func _arm_reverse_move() -> void:
 	_cancel_attack_move()
 	_cancel_drag()
 	_reverse_move_armed = true
-	_movement_mode_hint.text = "倒车：右键下令，Esc 取消"
+	_movement_mode_hint.text = "倒车：右键下令，E 或左键退出"
 	_movement_mode_hint.show()
 
 

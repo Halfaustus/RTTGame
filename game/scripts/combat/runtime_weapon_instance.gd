@@ -34,6 +34,18 @@ func _init(state: UnitState, owning_slot: WeaponSlotState, spatial_node: RefCoun
 	instance_id = "%s/%s/%s/%s" % [state.unit_id,node_kind,node_id,owning_slot.definition.slot_id]
 
 func owner_state() -> UnitState: return owner.get_ref()
+
+func initialize_first_magazine() -> void:
+	# Inventory is TOTAL available ammunition, including ready rounds (DB22).
+	# Readiness never transfers or adds stock; ammo is selected only at firing.
+	pending_rounds = 0
+	for ammo: AmmoDefinition in definition.ammo_definitions:
+		var available: int = maxi(0,int(inventory.get(ammo.ammo_id,0)))
+		pending_rounds += available
+		if pending_rounds >= definition.capacity:
+			pending_rounds = definition.capacity
+			return
+
 func spatial_node() -> RefCounted: return node.get_ref()
 func slot_state() -> WeaponSlotState: return slot.get_ref()
 

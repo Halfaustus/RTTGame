@@ -33,6 +33,9 @@ func finish_document(model: Node, initial: Dictionary, records: Array[Dictionary
 
 func _server_checks() -> void:
 	var model = load("res://scripts/networking/network_manager.gd").new()
+	# Frozen v1 command coverage includes reverse on the historical vehicle.
+	# Explicit isolated compatibility mode; never restore it to live presets.
+	model.legacy_combat_fixture_enabled = true
 	root.add_child(model)
 	check(model._movement.initialize_navigation(), "server navigation")
 	model._initialize_rebels()

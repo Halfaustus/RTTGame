@@ -42,17 +42,13 @@ func initialize(config: DeploymentConfig, movement: MovementConfig, map: Prototy
 	var catalog := {}
 	var definitions := {}
 	for entry: Dictionary in config.catalog:
-		if not _has_keys(entry, ["config_id", "category", "definition", "value_points", "sortie_points", "maximum_present", "width"]):
+		if not _has_keys(entry, ["config_id", "definition", "value_points", "sortie_points", "maximum_present", "width"]):
 			return "incomplete catalog entry"
 		if not _stable_id(entry.config_id) or catalog.has(entry.config_id) or not entry.definition is UnitDefinition:
 			return "invalid or duplicate catalog ID/definition"
+		if not entry.definition.spatial_valid(): return "invalid unit spatial configuration"
 		if definitions.has(entry.definition.resource_path) or entry.definition.resource_path.is_empty():
 			return "catalog definitions must be unique saved resources"
-		if entry.category not in ["infantry", "armored_vehicle"]:
-			return "unsupported ground category"
-		var expected_type := UnitDefinition.UnitType.ARMORED_VEHICLE if entry.category == "armored_vehicle" else UnitDefinition.UnitType.INFANTRY
-		if entry.definition.unit_type != expected_type:
-			return "category does not match unit definition"
 		for key: String in ["value_points", "sortie_points"]:
 			if not valid_score(entry[key]):
 				return "scores must be non-negative integers divisible by five"
@@ -67,7 +63,7 @@ func initialize(config: DeploymentConfig, movement: MovementConfig, map: Prototy
 		return "empty catalog"
 	var points := {}
 	for point: Dictionary in config.points:
-		if not _has_keys(point, ["point_id", "position", "yaw", "entry_kind", "allowed_factions", "allowed_categories"]):
+		if not _has_keys(point, ["point_id", "position", "yaw", "entry_kind", "allowed_factions"]):
 			return "incomplete deployment point"
 		if not _stable_id(point.point_id) or points.has(point.point_id):
 			return "invalid or duplicate deployment point ID"
@@ -77,14 +73,11 @@ func initialize(config: DeploymentConfig, movement: MovementConfig, map: Prototy
 			return "deployment point is not at unit ground height"
 		if not _number(point.yaw) or not is_finite(float(point.yaw)) or point.entry_kind not in ["ground", "air"]:
 			return "invalid deployment orientation or entry kind"
-		if not point.allowed_factions is Array or point.allowed_factions.is_empty() or not point.allowed_categories is Array:
+		if not point.allowed_factions is Array or point.allowed_factions.is_empty():
 			return "invalid deployment restrictions"
 		for faction: Variant in point.allowed_factions:
 			if not faction is int or faction <= 0:
 				return "invalid allowed faction"
-		for category: Variant in point.allowed_categories:
-			if category not in ["infantry", "armored_vehicle"]:
-				return "invalid allowed category"
 		points[point.point_id] = point.duplicate(true)
 	if points.is_empty():
 		return "empty deployment points"
@@ -174,8 +167,6 @@ func request_order(player_id: int, config_id: String, point_id: String, destinat
 		return _rejected("invalid deployment or value score")
 	if point.entry_kind != "ground" or not point.allowed_factions.has(account.faction_id):
 		return _rejected("deployment point not permitted")
-	if not point.allowed_categories.is_empty() and not point.allowed_categories.has(entry.category):
-		return _rejected("unit category not permitted")
 	var counts := card_counts(player_id, config_id)
 	if counts.present + counts.pending >= entry.maximum_present:
 		return _rejected("card limit reached")
@@ -289,17 +280,9 @@ func static_spawn_available(config_id: String, point_id: String) -> bool:
 	if not _catalog.has(config_id) or not _points.has(point_id) or _points[point_id].entry_kind != "ground":
 		return false
 	var position: Vector3 = _points[point_id].position
-	var clearance: float = _catalog[config_id].width * 0.5 + _movement.obstacle_margin
-	var xz := Vector2(position.x, position.z)
-	var minimum := _movement.minimum_xz + Vector2.ONE * clearance
-	var maximum := _movement.maximum_xz - Vector2.ONE * clearance
-	if xz.x < minimum.x or xz.y < minimum.y or xz.x > maximum.x or xz.y > maximum.y:
-		return false
-	for obstacle: Rect2 in _map.obstacles:
-		var blocked := obstacle.grow(clearance)
-		if xz.x >= blocked.position.x and xz.y >= blocked.position.y and xz.x <= blocked.end.x and xz.y <= blocked.end.y:
-			return false
-	return true
+	var candidate := UnitState.new(-1, 0, position)
+	candidate.definition = _catalog[config_id].definition
+	return MovementSimulation.placement_available(candidate, position, {}, _movement, _map)
 
 
 # Body sortie cost only; independent value points never contribute.
@@ -332,13 +315,13 @@ func export_player(player_id: int) -> Dictionary:
 	for config_id: String in _catalog:
 		cards[config_id] = card_counts(player_id, config_id)
 		var entry: Dictionary = _catalog[config_id]
-		catalog.append({"config_id":config_id,"category":entry.category,"value_points":entry.value_points,
+		catalog.append({"config_id":config_id,"value_points":entry.value_points,
 			"sortie_points":entry.sortie_points,"maximum_present":entry.maximum_present,
 			"unit_type":entry.definition.unit_type,"armed":entry.definition.is_armed()})
 	var points: Array[Dictionary] = []
 	for point: Dictionary in _points.values():
 		if point.entry_kind == "ground" and point.allowed_factions.has(account.faction_id):
-			points.append({"point_id":point.point_id,"allowed_categories":point.allowed_categories.duplicate()})
+			points.append({"point_id":point.point_id})
 	var orders: Array[Dictionary] = []
 	for order: Dictionary in _orders.values():
 		if order.player_id == player_id:
@@ -380,7 +363,7 @@ func execute_deployments(units: Dictionary, spawn: Callable) -> void:
 	for order: Dictionary in due:
 		var entry: Dictionary = _catalog[order.config_id]
 		var point: Dictionary = _points[order.point_id]
-		var position: Variant = find_spawn_position(maxf(entry.width,entry.definition.movement_radius * 2.0), point.position, units)
+		var position: Variant = find_spawn_position(entry.definition, point.position, units)
 		if position == null:
 			order.next_retry_tick = _tick + _retry_ticks
 			if order.status != "waiting":
@@ -404,7 +387,9 @@ func execute_deployments(units: Dictionary, spawn: Callable) -> void:
 		_emit("order_generated", order.player_id, order)
 
 
-func find_spawn_position(width: float, center: Vector3, units: Dictionary) -> Variant:
+func find_spawn_position(definition: UnitDefinition, center: Vector3, units: Dictionary) -> Variant:
+	var candidate := UnitState.new(-1, 0, center)
+	candidate.definition = definition
 	var candidates: Array[Vector3] = []
 	var reach := floori(_config.spawn_search_radius / _config.spawn_search_step)
 	for x: int in range(-reach, reach + 1):
@@ -418,32 +403,8 @@ func find_spawn_position(width: float, center: Vector3, units: Dictionary) -> Va
 		if not is_equal_approx(da, db): return da < db
 		return a.x < b.x if a.x != b.x else a.z < b.z)
 	for position: Vector3 in candidates:
-		if not _static_position_available(position, width): continue
-		var occupied := false
-		for unit: UnitState in units.values():
-			if unit.health <= 0: continue
-			var other_width := maxf(_movement.unit_width,unit.movement_radius() * 2.0)
-			for entry: Dictionary in _catalog.values():
-				if unit.definition == entry.definition:
-					other_width = maxf(other_width,entry.width)
-					break
-			var separation: float = (width + other_width) * 0.5 + _movement.obstacle_margin
-			if absf(position.x - unit.position.x) < separation and absf(position.z - unit.position.z) < separation:
-				occupied = true
-				break
-		if not occupied: return position
+		if MovementSimulation.placement_available(candidate, position, units, _movement, _map): return position
 	return null
-
-
-func _static_position_available(position: Vector3, width: float) -> bool:
-	var clearance := width * 0.5 + _movement.obstacle_margin
-	if position.x < _movement.minimum_xz.x + clearance or position.x > _movement.maximum_xz.x - clearance or position.z < _movement.minimum_xz.y + clearance or position.z > _movement.maximum_xz.y - clearance:
-		return false
-	for obstacle: Rect2 in _map.obstacles:
-		var rect := obstacle.abs().grow(clearance)
-		if position.x >= rect.position.x and position.x <= rect.end.x and position.z >= rect.position.y and position.z <= rect.end.y:
-			return false
-	return true
 
 
 # Server-only export boundary, not a network broadcast or a v1 replay extension.

@@ -135,20 +135,10 @@ func run() -> void:
 	for state: UnitState in network._authoritative_units.values():
 		if state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.INFANTRY: free_valid = state.members.size() == 8
 	check(free_valid,"free production initialization")
-	var free_vehicle_valid := false
-	for state: UnitState in network._authoritative_units.values():
-		if state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.ARMORED_VEHICLE:
-			free_vehicle_valid = state.members.is_empty() and state.mounts.size() == 2 and state.blocks_movement()
-	check(free_vehicle_valid,"free hull initialized with confirmed 0.5D mount loadout")
+	check(not network._authoritative_units.values().any(func(state): return state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.ARMORED_VEHICLE),"retired vehicles never free-spawn")
 	network.timeline.enter_phase("replication")
 	network.timeline.finish_tick()
-	var armor: Dictionary = network.deployment.buy_order(1,"test.armored","ground.west")
-	check(armor.ok and network.deployment.place_order(1,armor.order_id,Vector3(14,0,110)).ok,"armor purchase placement")
-	for tick: int in 180: network._run_server_tick(PackedInt32Array([42]))
-	var armor_row: Dictionary = network.deployment._orders[armor.order_id]
-	check(armor_row.status == "generated","armor order completes")
-	var bought_armor: UnitState = network._authoritative_units[armor_row.unit_id]
-	check(bought_armor.members.is_empty() and bought_armor.blocks_movement() and bought_armor.intersects_hit_segment(bought_armor.position-Vector3.RIGHT,bought_armor.position+Vector3.RIGHT),"purchased hull geometry")
+	check(not network.deployment.buy_order(1,"test.armored","ground.west").ok,"retired armor purchase rejected")
 	network._receive_unit_structures([squad.structure_snapshot()])
 	check(network.presentation.live_structures.is_empty(),"structure RPC rejects unauthenticated local authority")
 	network.free()

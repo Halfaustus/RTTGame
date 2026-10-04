@@ -114,7 +114,7 @@ func _initialize_weapons() -> void:
 		slot_definition.orientation_priority = allocation.orientation_priority
 		var instance := _attach_weapon(slot_definition,allocation.node_kind,identifier,spatial)
 		instance.inventory = allocation.initial_inventory.duplicate(true)
-		instance.pending_rounds = allocation.initial_pending
+		instance.initialize_first_magazine()
 		if spatial is SoldierState: spatial.weapon_slots.append(slot_definition)
 		elif spatial is WeaponMountState: spatial.weapon_slots.append(slot_definition)
 		else: hull_weapon_slots.append(slot_definition)

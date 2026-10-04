@@ -59,7 +59,7 @@ func run() -> void:
 	owner.owner_player_id = 42
 	owner.configure(1,catalog.squad(true))
 	var victim := UnitState.new(202,0,Vector3(5,1,0))
-	victim.configure(1,catalog.vehicle("a"))
+	victim.configure(1,catalog.weapon_slot_fixture("a"))
 	var states: Dictionary[int,UnitState] = {1:owner,202:victim}
 	simulation.collision.sync_units(states)
 	var hp := victim.health
@@ -130,7 +130,7 @@ func ballistic_checks() -> void:
 	var offset := DirectBallistics.spread_offset(first,0.15,Vector3.FORWARD)
 	check(offset == DirectBallistics.spread_offset(second,0.15,Vector3.FORWARD) and offset.length() <= 0.15,"seeded fixed world disk radius")
 	var vehicle := UnitState.new(8,42,Vector3(1,1,1))
-	vehicle.configure(1,catalog.vehicle("c"))
+	vehicle.configure(1,catalog.weapon_slot_fixture("c"))
 	vehicle.yaw = PI/2
 	vehicle.mounts[0].world_yaw = 0
 	var main := vehicle.runtime_weapons[0]
@@ -172,7 +172,7 @@ func production_checks() -> void:
 	network.projectile_terminal_received.connect(func(row): ends.append(row))
 	var hp := enemy.health
 	for frame: int in 600: network._run_server_tick(PackedInt32Array())
-	check(not spawns.is_empty() and not ends.is_empty(),"production fire to flight to termination")
+	check(spawns.is_empty() and ends.is_empty(),"unobserved production enemy cannot generate fire or projectile disclosure")
 	check(enemy.health == hp and not network.timeline.records.any(func(row): return row.type == "shot"),"no old damage or replay shot")
 	check(network._projectiles.profile.failures == 0,"no collision query failures")
 	check(network._projectiles.profile.spawned == spawns.size(),"exactly one spawn per consumed emission")
@@ -227,7 +227,7 @@ func additional_checks() -> void:
 	target.position = Vector3(0,0,-500)
 	weapon.bind_target(AttackTarget.unit(target))
 	var friend := UnitState.new(3,42,Vector3(0,0,-10))
-	friend.configure(1,catalog.vehicle("c"))
+	friend.configure(1,catalog.weapon_slot_fixture("c"))
 	simulation.collision.sync_units({1:owner,2:target,3:friend})
 	check(not simulation.collision.fire_clear(weapon,Vector3.ZERO,Vector3(0,0,-100),{}),"normal prefire friendly blocker pauses")
 	weapon.bind_target(AttackTarget.ground(Vector3(0,0,-100)))
@@ -264,7 +264,7 @@ func additional_checks() -> void:
 		var batch := firing.advance(0,1,aiming)
 		check(batch.size() == 1 and batch[0].spread_radius_m == 0.15,"gun scatter fixed at range="+str(range_m))
 	var vehicle := UnitState.new(60,42,Vector3.ZERO)
-	vehicle.configure(1,catalog.vehicle("a"))
+	vehicle.configure(1,catalog.weapon_slot_fixture("a"))
 	target = UnitState.new(61,0,Vector3(0,0,-900))
 	target.configure(2,catalog.squad(false))
 	aiming.units = {60:vehicle,61:target}

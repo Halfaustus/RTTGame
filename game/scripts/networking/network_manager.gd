@@ -58,7 +58,7 @@ var _fire := FireSimulation.new()
 var _projectiles: ProjectileSimulation
 var _previous_ballistic_positions: Dictionary = {}
 var legacy_combat_fixture_enabled := false # Explicit historical test opt-in only.
-var _weapon_presets: Array[UnitDefinition] = [preload("res://data/05d/vehicle_a.tres"),preload("res://data/05d/assault.tres"),preload("res://data/05d/defense.tres")]
+var _weapon_presets: Array[UnitDefinition] = [preload("res://data/05d/assault.tres"),preload("res://data/05d/defense.tres")]
 var _rebels_initialized: bool = false
 var _player_spawn_index: int = 1
 
@@ -202,11 +202,8 @@ func _apply_peer_join(peer_id: int) -> void:
 	for index: int in MOVEMENT_CONFIG.units_per_peer:
 		var unit_id := _next_unit_id
 		_next_unit_id += 1
-		var spawn: Variant = _movement.resolve_spawn_position(MOVEMENT_CONFIG.spawn_position(_player_spawn_index))
+		var spawn: Vector3 = MOVEMENT_CONFIG.spawn_position(_player_spawn_index)
 		_player_spawn_index += 1
-		if spawn == null:
-			push_error("No walkable spawn position for unit %d." % unit_id)
-			continue
 		var state := UnitState.new(unit_id, peer_id, spawn)
 		state.owner_player_id = player_id
 		state.configure(COMBAT_CONFIG.player_team_id, COMBAT_CONFIG.player_definitions[index % COMBAT_CONFIG.player_definitions.size()] if legacy_combat_fixture_enabled else _weapon_presets[index % _weapon_presets.size()])
@@ -231,11 +228,7 @@ func _initialize_rebels() -> void:
 		return
 	_rebels_initialized = true
 	for requested: Vector3 in COMBAT_CONFIG.rebel_positions:
-		var spawn: Variant = _movement.resolve_spawn_position(requested)
-		if spawn == null:
-			push_error("No walkable rebel spawn.")
-			continue
-		var state := UnitState.new(_next_unit_id, 0, spawn)
+		var state := UnitState.new(_next_unit_id, 0, requested)
 		_next_unit_id += 1
 		state.configure(COMBAT_CONFIG.rebel_team_id, COMBAT_CONFIG.rebel_definition if legacy_combat_fixture_enabled else _weapon_presets[1])
 		var sized_spawn: Variant = _movement.resolve_spawn_position(state.position, state)
@@ -326,8 +319,13 @@ func _apply_stop(unit_ids: Array[int], sender: int) -> Dictionary:
 	for unit_id: int in accepted:
 		positions.append(_authoritative_units[unit_id].position)
 		for instance: RuntimeWeaponInstance in _authoritative_units[unit_id].runtime_weapons: instance.clear_target()
+		_movement.attack_facing_requests.erase(unit_id)
 		# Remove any older buffered position before broadcasting the current stop position.
 		_pending_positions.erase(unit_id)
+	for command: Dictionary in _pending_commands:
+		if command.peer_id != sender: continue
+		command.unit_ids = command.unit_ids.filter(func(id): return not accepted.has(id))
+	_pending_commands = _pending_commands.filter(func(command): return not command.unit_ids.is_empty())
 	return {"unit_ids": accepted, "positions": positions}
 
 
@@ -404,8 +402,8 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	for id: int in _movement.active_command_ids():
 		_dirty_units[id] = true
 	_aiming.units = _authoritative_units
-	# The current prototype replicates all live map units; there is no fog system.
-	_aiming.visibility = func(_owner: UnitState, target: AttackTarget): return target.kind == AttackTarget.Kind.FORCED_GROUND or target.valid(_authoritative_units)
+	# No detection provider exists yet: never equate valid enemy with visible enemy.
+	_aiming.visibility = func(owner: UnitState, target: AttackTarget): return target.kind == AttackTarget.Kind.FORCED_GROUND or (target.valid(_authoritative_units) and _authoritative_units[target.unit_id].team_id == owner.team_id)
 	_aiming.clear_path = _combat.has_line_of_sight
 	_aiming.moving = _movement.is_moving
 	_movement.attack_facing_requests = _aiming.hull_requests()
@@ -674,7 +672,41 @@ func capture_replay_checkpoint() -> Dictionary:
 
 
 func _queue_replication(method: String, arguments: Array, peer_id: int = -1) -> void:
-	_replication_queue.append({"method": method, "arguments": arguments.duplicate(true), "peer_id": peer_id})
+	if legacy_combat_fixture_enabled:
+		_replication_queue.append({"method": method, "arguments": arguments.duplicate(true), "peer_id": peer_id})
+		return
+	var recipients: Array = _peer_players.keys() if peer_id == -1 else [peer_id]
+	for recipient: int in recipients:
+		var permitted := _replication_arguments_for_peer(method,arguments,recipient)
+		if not permitted.is_empty():
+			_replication_queue.append({"method":method,"arguments":permitted.duplicate(true),"peer_id":recipient})
+
+func _replication_arguments_for_peer(method: String, arguments: Array, peer_id: int) -> Array:
+	if not _peer_players.has(peer_id): return []
+	# Until a detection provider exists, enemy visibility is not established.
+	# Projectile payload projection remains frozen: withhold rather than invent a schema.
+	if method in ["_receive_projectile_events","_receive_weapon_fires"]: return []
+	if method == "_receive_unit_structures":
+		var structures: Array[Dictionary] = []
+		for structure: Dictionary in arguments[0]:
+			if _authoritative_units.has(structure.unit_id) and _authoritative_units[structure.unit_id].owner_player_id == _peer_players[peer_id]:
+				structures.append(structure)
+		return [structures] if not structures.is_empty() else []
+	if method == "_receive_unit_snapshot":
+		return arguments if int(arguments[0].team_id) == COMBAT_CONFIG.player_team_id else []
+	if method in ["_receive_unit_positions","_receive_unit_orientations","_receive_unit_stops","_receive_move_targets","_receive_move_paths"]:
+		var ids: Array[int] = []
+		var values: Array = arguments[1].duplicate()
+		values.clear()
+		for index: int in arguments[0].size():
+			var id: int = arguments[0][index]
+			if _authoritative_units.has(id) and _authoritative_units[id].team_id == COMBAT_CONFIG.player_team_id:
+				ids.append(id)
+				values.append(arguments[1][index])
+		return [ids,values] if not ids.is_empty() else []
+	if method == "_receive_unit_death":
+		return arguments if _authoritative_units.has(arguments[0]) and _authoritative_units[arguments[0]].team_id == COMBAT_CONFIG.player_team_id else []
+	return arguments
 
 
 func _flush_replication() -> void:
@@ -692,14 +724,19 @@ func _flush_replication() -> void:
 func _ensure_deployment_ready() -> bool:
 	if deployment.is_ready():
 		return true
-	var error := deployment.initialize(DEPLOYMENT_CONFIG, MOVEMENT_CONFIG, MovementSimulation.MAP_DEFINITION, timeline.tick_hz)
+	var config: DeploymentConfig = DEPLOYMENT_CONFIG
+	if not legacy_combat_fixture_enabled:
+		config = DEPLOYMENT_CONFIG.duplicate()
+		config.catalog = []
+		for entry: Dictionary in DEPLOYMENT_CONFIG.catalog:
+			if entry.config_id != "test.rifle": continue
+			var active_entry := entry.duplicate()
+			active_entry.definition = _weapon_presets[0]
+			config.catalog.append(active_entry)
+	var error := deployment.initialize(config, MOVEMENT_CONFIG, MovementSimulation.MAP_DEFINITION, timeline.tick_hz)
 	if not error.is_empty():
 		push_error("Deployment configuration rejected: " + error)
 		return false
-	if not legacy_combat_fixture_enabled:
-		# Preserve existing explicitly temporary prices/card IDs; no new balancing.
-		deployment._catalog["test.armored"].definition = _weapon_presets[0]
-		deployment._catalog["test.rifle"].definition = _weapon_presets[1]
 	return true
 
 
@@ -710,6 +747,8 @@ func bind_weapon_target(sender_peer: int, unit_id: int, instance_id: String, tar
 	var owner: UnitState = _authoritative_units[unit_id]
 	var target: UnitState = _authoritative_units[target_id]
 	if owner.owner_peer_id != sender_peer or not _peer_players.has(sender_peer) or owner.owner_player_id != _peer_players[sender_peer] or target.team_id == owner.team_id: return false
+	# No production detection provider yet; an enemy ID is not visibility proof.
+	if not legacy_combat_fixture_enabled: return false
 	for instance: RuntimeWeaponInstance in owner.runtime_weapons:
 		if instance.instance_id == instance_id:
 			instance.bind_target(AttackTarget.unit(target))

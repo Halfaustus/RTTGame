@@ -84,16 +84,15 @@ func _run() -> void:
 	check(not waiting.static_spawn_available("test.armored", "ground.west") and buy(waiting).ok, "blocked valid point reserves pending order; execution/wait deferred")
 	var sized: DeploymentConfig = CONFIG.duplicate(true)
 	sized.points[0].position = Vector3(-19, 0.5, 112)
-	sized.catalog[0].width = 3.0
+	sized.catalog[0].definition.movement_radius = 1.5
 	var clearance := create(sized)
 	check(not clearance.static_spawn_available("test.armored", "ground.west") and clearance.static_spawn_available("test.rifle", "ground.west"), "unit size changes boundary clearance")
 	var restricted: DeploymentConfig = CONFIG.duplicate(true)
 	restricted.points[0].allowed_factions = [2]
-	restricted.points[1].allowed_categories = ["infantry"]
 	var restrictions := create(restricted)
 	restrictions.register_player(1, 1, 0)
-	check(not buy(restrictions).ok and not buy(restrictions, 1, "test.armored", "ground.east").ok and buy(restrictions, 1, "test.rifle", "ground.east").ok, "faction and reserved category permissions")
-	for variant: String in ["duplicate_point", "duplicate_config", "map_id", "position", "yaw", "faction", "category", "price", "limit", "height"]:
+	check(not buy(restrictions).ok and buy(restrictions, 1, "test.armored", "ground.east").ok and buy(restrictions, 1, "test.rifle", "ground.east").ok, "faction restriction without retired category permissions")
+	for variant: String in ["duplicate_point", "duplicate_config", "map_id", "position", "yaw", "faction", "price", "limit", "height"]:
 		var bad: DeploymentConfig = CONFIG.duplicate(true)
 		match variant:
 			"duplicate_point": bad.points.append(bad.points[0].duplicate(true))
@@ -102,7 +101,6 @@ func _run() -> void:
 			"position": bad.points[0].position = Vector3(INF, 0, 0)
 			"yaw": bad.points[0].yaw = NAN
 			"faction": bad.points[0].allowed_factions = []
-			"category": bad.catalog[0].category = "aircraft"
 			"price": bad.catalog[0].sortie_points = -1.0
 			"limit": bad.catalog[0].maximum_present = 0
 			"height": bad.points[0].position.y = 8.0

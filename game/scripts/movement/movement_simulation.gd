@@ -82,15 +82,36 @@ func is_navigation_ready() -> bool:
 
 
 func resolve_spawn_position(position: Vector3, state: UnitState = null) -> Variant:
-	if state != null: return navigation_for(state).nearest_walkable_position(position)
+	if state != null:
+		if placement_available(state, position, _units, _config, _map_definition): return position
+		var nearest: Variant = navigation_for(state).nearest_walkable_position(position)
+		return nearest if nearest != null and placement_available(state, nearest, _units, _config, _map_definition) else null
 	_navigation.configure_dynamic([],[])
 	return _navigation.nearest_walkable_position(position)
 
 
-func deploy_move(state: UnitState, destination: Vector3, mode: int, width: float, map: PrototypeMapDefinition = MAP_DEFINITION) -> Dictionary:
+# Common ground-placement legality for spawning and future unloading.
+# No hitbox, visual geometry, card width or deployment-specific separation.
+static func placement_available(state: UnitState, position: Vector3, units: Dictionary, config: MovementConfig, map: PrototypeMapDefinition) -> bool:
+	if state == null or state.definition == null or map == null or config == null: return false
+	var vehicle := state.unit_type() == UnitDefinition.UnitType.ARMORED_VEHICLE
+	var radius := state.movement_radius() if vehicle else 0.0
+	if vehicle and (not is_finite(radius) or radius <= 0): return false
+	# Reuse the existing movement static margin for vehicles, never add one for infantry.
+	var footprint := radius + config.obstacle_margin if vehicle else 0.0
+	if not StaticNavigationGrid.static_position_walkable(position, config, map.obstacles, footprint): return false
+	if vehicle:
+		for other: UnitState in units.values():
+			if other.unit_id == state.unit_id or not other.blocks_movement(): continue
+			var offset := Vector2(position.x-other.position.x, position.z-other.position.z)
+			if offset.length() < radius + other.movement_radius() - StaticNavigationGrid.POSITION_EPSILON: return false
+	return true
+
+
+func deploy_move(state: UnitState, destination: Vector3, mode: int, _width: float, map: PrototypeMapDefinition = MAP_DEFINITION) -> Dictionary:
 	if not _valid_speeds(state): return {"notice":"invalid unit spatial configuration", "target":state.position}
-	# The old deployment width remains a conservative lower bound for this entry.
-	var navigation := navigation_for(state,true,width)
+	# Card width is a legacy interface argument, never a movement footprint.
+	var navigation := navigation_for(state)
 	var target := Vector3(destination.x, state.position.y, destination.z)
 	var path := navigation.deployment_path(state.position, target, mode == MoveMode.FAST, state)
 	if path.size() < 2 or path[0].is_equal_approx(path[path.size() - 1]):

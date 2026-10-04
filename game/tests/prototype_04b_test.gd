@@ -70,14 +70,14 @@ func _run() -> void:
 	ui.request_sent.connect(func(action: String, payload: Dictionary, request_id: int): requests.append({"action":action,"payload":payload,"request_id":request_id}))
 	ui.apply_state(economy.export_player(1))
 	await process_frame
-	check(ui._rows.get_child_count() == 2 and ui._balance.text.contains("1000"), "category purchase interface shows balance and entries")
+	check(ui._rows.get_child_count() == 3 and ui._balance.text.contains("1000"), "purchase interface lists entries without retired category filter")
 	world._camera._rotating = true
 	ui.buy("test.rifle")
 	check(requests.is_empty() and not ui.busy, "rotation blocks purchase confirmation")
 	world._camera._rotating = false
 	world._attack_move_armed = true
 	world._pending_actions.append({"type":"stop"})
-	var buy_button: Button = ui._rows.get_child(0)
+	var buy_button: Button = ui._purchase_buttons["test.rifle"]
 	var click := mouse(MOUSE_BUTTON_LEFT)
 	click.position = buy_button.get_global_rect().get_center()
 	root.push_input(click, true)

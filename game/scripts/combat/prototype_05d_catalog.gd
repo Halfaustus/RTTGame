@@ -64,6 +64,7 @@ func _init() -> void:
 		value.reduction_ignore = 0
 		value.temporary_fields.append("reduction_ignore")
 		if value.definition_id in ["pdw","rifle","lmg","vehicle_mg"]: value.temporary_fields.append("ammo.test_curve_shape")
+		if value.definition_id.begins_with("cannon_"): value.temporary_fields.append("ammo.explosion_radius_m")
 	Prototype05FConfig.configure(weapons)
 
 func _ammo(id: String, kind: String, damage: float, upper: float, distance: float, penetration: float, module: float = 0, radius: float = -1, suppression: float = 0) -> void:
@@ -111,7 +112,7 @@ func allocate(definition: UnitDefinition, weapon_id: String, kind: int, node_id:
 	value.mount_id = node_id if kind == WeaponAllocation.NodeKind.MOUNT else ""
 	value.slot_id = slot_id
 	value.initial_inventory = inventory.duplicate(true)
-	value.initial_pending = mini(value.definition.capacity,int(inventory.values().reduce(func(a, b): return a + b,0)))
+	value.initial_pending = 0 # Runtime applies the user-confirmed full-first-magazine rule.
 	value.direction_primary = primary
 	value.orientation_priority = 0 if weapon_id.begins_with("cannon_") else 1
 	value.occupied_slots.assign(["primary","secondary"] if weapon_id == "recoilless" else [slot_id])
@@ -140,29 +141,21 @@ func squad(assault: bool) -> UnitDefinition:
 		value.weapon_allocations.append(stock)
 	return value
 
-func vehicle(model: String) -> UnitDefinition:
+# Isolated weapon-slot regression fixture, never a playable vehicle preset.
+# No A/B/C unit identity, armor, HP, speed or capabilities are carried forward.
+func weapon_slot_fixture(weapon_model: String) -> UnitDefinition:
 	var value := UnitDefinition.new()
-	value.resource_name = "vehicle_"+model
+	value.resource_name = "isolated_weapon_slot_fixture"
 	value.unit_type = UnitDefinition.UnitType.ARMORED_VEHICLE
-	value.maximum_health = 16 if model == "c" else 14
-	value.hardened_speed = 20 if model == "c" else 25
-	value.unhardened_speed = 16 if model == "c" else 12.5
-	value.hardened_reverse_speed = value.hardened_speed * 0.1
-	value.unhardened_reverse_speed = value.unhardened_speed * 0.1
-	value.turn_speed_degrees = 100 if model == "c" else 60
-	var front := [120,400] if model == "c" else ([100,100] if model == "a" else [80,250])
-	var side := [70,240] if model == "c" else ([60,60] if model == "a" else [50,150])
-	value.kinetic_armor_by_face = {"front":front[0],"side":side[0],"rear":40,"top":40}
-	value.chemical_armor_by_face = {"front":front[1],"side":side[1],"rear":40,"top":40}
-	value.ability_tags.assign(["smoke_1","mobile_supply"] if model == "c" else ["smoke_1"])
+	value.maximum_health = 10 # DB22 vehicle range lower bound, fixture only.
 	for id: String in ["main","commander"]:
 		var mount := WeaponMountDefinition.new()
 		mount.mount_id = id
 		mount.kind = WeaponMountDefinition.Kind.MAIN_TURRET if id == "main" else WeaponMountDefinition.Kind.WEAPON_STATION
 		mount.rotation_speed_degrees = 120 if id == "main" else 360
 		value.mounts.append(mount)
-	allocate(value,"cannon_"+model,WeaponAllocation.NodeKind.MOUNT,"main","main",{"cannon_a_ap":10,"cannon_a_he":40} if model == "a" else {"cannon_bc_ap":30,"cannon_bc_he":120},true)
+	allocate(value,"cannon_"+weapon_model,WeaponAllocation.NodeKind.MOUNT,"main","main",{"cannon_a_ap":10,"cannon_a_he":40} if weapon_model == "a" else {"cannon_bc_ap":30,"cannon_bc_he":120},true)
 	allocate(value,"vehicle_mg",WeaponAllocation.NodeKind.MOUNT,"main","coax",{"standard":2250})
 	allocate(value,"vehicle_mg",WeaponAllocation.NodeKind.MOUNT,"commander","mg",{"standard":2250},true)
-	if model == "c": allocate(value,"vehicle_mg",WeaponAllocation.NodeKind.HULL,"hull","mg",{"standard":2250},true)
+	if weapon_model == "c": allocate(value,"vehicle_mg",WeaponAllocation.NodeKind.HULL,"hull","mg",{"standard":2250},true)
 	return value

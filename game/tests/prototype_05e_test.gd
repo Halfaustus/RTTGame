@@ -172,7 +172,7 @@ func extra_checks() -> void:
 	check(step(0).is_empty() and weapon.inventory.standard == 150,"destroyed target cannot consume inventory")
 	setup("rifle")
 	var vehicle := UnitState.new(3,42,Vector3.ZERO)
-	vehicle.configure(1,catalog.vehicle("b"))
+	vehicle.configure(1,catalog.weapon_slot_fixture("b"))
 	aiming.units[3] = vehicle
 	for instance: RuntimeWeaponInstance in vehicle.runtime_weapons:
 		instance.bind_target(AttackTarget.unit(victim))
@@ -221,7 +221,7 @@ func selection_checks() -> void:
 func vehicle_checks() -> void:
 	setup("rifle")
 	var vehicle := UnitState.new(3,42,Vector3.ZERO)
-	vehicle.configure(1,catalog.vehicle("a"))
+	vehicle.configure(1,catalog.weapon_slot_fixture("a"))
 	aiming.units[3] = vehicle
 	weapon = vehicle.runtime_weapons[0]
 	weapon.bind_target(AttackTarget.unit(victim))
@@ -285,7 +285,7 @@ func network_checks() -> void:
 	network.weapon_fire_received.connect(func(event): emitted.append(event))
 	var hp := enemy.health
 	for index: int in 1200: network._run_server_tick(PackedInt32Array([42]))
-	check(not emitted.is_empty() and state.runtime_weapons[2].inventory != stock_before,"production emits and debits")
+	check(emitted.is_empty() and state.runtime_weapons[2].inventory == stock_before,"unobserved production enemy is not firing permission")
 	check(enemy.health == hp and not network.timeline.records.any(func(row): return row.type == "shot"),"no old damage or replay shot side effects")
 	check(network.INTERNAL_STATE_REPLICATION_HZ == 10 and state.structure_snapshot().weapons[2].has("fire"),"existing ten Hz flow state replication")
 	var before: int = network.presentation._fire_sequences.size()

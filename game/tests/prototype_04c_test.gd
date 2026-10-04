@@ -45,6 +45,7 @@ func advance(service: DeploymentEconomy, tick: int) -> void:
 	service.execute_deployments(units,spawn)
 
 func _run() -> void:
+	placement_checks()
 	var service := create()
 	var id := order(service)
 	advance(service,179)
@@ -62,9 +63,9 @@ func _run() -> void:
 	var blocker := UnitState.new(9,0,Vector3(-12,0.5,112))
 	blocker.configure(2,CONFIG.catalog[0].definition)
 	units[9] = blocker
-	id = order(service)
+	id = order(service,"test.armored")
 	advance(service,180)
-	check(service._orders[id].status == "waiting" and service.export_player(1).balance == 850.0 and generated.is_empty(),"enemy occupancy waits without fee/refund or closing point")
+	check(service._orders[id].status == "waiting" and service.export_player(1).balance == 700.0 and generated.is_empty(),"enemy vehicle occupancy waits without fee/refund or closing point")
 	blocker.position.x = -8
 	advance(service,194)
 	check(generated.is_empty(),"fixed retry cadence")
@@ -74,9 +75,9 @@ func _run() -> void:
 	service = create(blocked_config)
 	units[9] = blocker
 	blocker.position = Vector3(-12,0.5,112)
-	var old := order(service)
+	var old := order(service,"test.armored")
 	advance(service,1)
-	var later := order(service)
+	var later := order(service,"test.armored")
 	advance(service,180)
 	units.clear()
 	advance(service,181)
@@ -88,15 +89,10 @@ func _run() -> void:
 	check(generated == ids and units.size() == 3,"same tick ID ordering and three generations")
 	var positions: Array[Vector3] = []
 	for state: UnitState in units.values(): positions.append(state.position)
-	check(positions[0] == Vector3(-12,0.5,112) and positions[1] == Vector3(-13.5,0.5,112),"nearest candidate and stable X/Z tie order")
-	var separated := true
-	for i: int in positions.size():
-		for j: int in range(i+1,positions.size()):
-			separated = separated and (absf(positions[i].x-positions[j].x)>=1.05 or absf(positions[i].z-positions[j].z)>=1.05)
-	check(separated,"successful spawn immediately occupies slot")
+	check(positions.all(func(position): return position == Vector3(-12,0.5,112)),"infantry deployments share nearest static-valid position")
 	units.clear(); generated.clear()
 	var sized_config: DeploymentConfig = blocked_config.duplicate(true)
-	sized_config.catalog[0].width = 3.0
+	sized_config.catalog[0].definition.movement_radius = 1.5
 	var corridor: PrototypeMapDefinition = MAP.duplicate(true)
 	corridor.obstacles.append(Rect2(-16,110,3.25,4))
 	corridor.obstacles.append(Rect2(-11.25,110,3.25,4))
@@ -105,7 +101,7 @@ func _run() -> void:
 	var small := order(service)
 	advance(service,180)
 	check(service._orders[large].status == "waiting" and generated == [small],"large footprint blocked but later small order proceeds")
-	check(service.find_spawn_position(3,Vector3(-12,0.5,112),units) == null,"search never expands outside fixed radius")
+	check(service.find_spawn_position(sized_config.catalog[0].definition,Vector3(-12,0.5,112),units) == null,"search never expands outside fixed radius")
 	units.clear()
 	service._map.obstacles.clear()
 	advance(service,195)
@@ -126,7 +122,7 @@ func _run() -> void:
 	service = create(blocked_config)
 	units[9] = blocker
 	blocker.position = Vector3(-12,0.5,112)
-	id = order(service)
+	id = order(service,"test.armored")
 	advance(service,180)
 	check(service.pickup_order(1,id).ok and service.cancel_order(1,id).refunded,"pickup waiting and refund")
 	check(not service.cancel_order(1,id).refunded and service.export_player(1).balance == 1000.0,"repeat cancel no double refund")
@@ -147,6 +143,41 @@ func _run() -> void:
 	file.store_string(JSON.stringify({"checks":checks,"failures":failures}))
 	print("0.4C checks=",checks," failures=",failures)
 	quit(1 if failures else 0)
+
+
+func placement_checks() -> void:
+	var service := create()
+	var center := Vector3(-12,0.5,112)
+	var infantry_definition := UnitDefinition.new()
+	var vehicle_definition := UnitDefinition.new()
+	vehicle_definition.unit_type = UnitDefinition.UnitType.ARMORED_VEHICLE
+	vehicle_definition.movement_radius = 0.5
+	vehicle_definition.hitbox_half_extents = Vector3(8,8,8)
+	var infantry := UnitState.new(80,42,center)
+	infantry.configure(1,infantry_definition)
+	var vehicle := UnitState.new(81,42,center)
+	vehicle.configure(1,vehicle_definition)
+	var occupied := {80:infantry,81:vehicle}
+	check(service.find_spawn_position(infantry_definition,center,occupied) == center,"infantry deploys overlapping infantry and vehicle")
+	var candidate := UnitState.new(82,42,center)
+	candidate.configure(1,vehicle_definition)
+	check(not MovementSimulation.placement_available(candidate,center,occupied,MOVEMENT,MAP),"vehicle circles cannot overlap")
+	check(MovementSimulation.placement_available(candidate,center+Vector3(0.75,0,0.75),occupied,MOVEMENT,MAP),"diagonal circles clear despite overlapping hitboxes and old square occupancy")
+	check(MovementSimulation.placement_available(candidate,center+Vector3.RIGHT,occupied,MOVEMENT,MAP),"tangent vehicle circles need no extra safety distance")
+	check(MovementSimulation.placement_available(candidate,center,{80:infantry},MOVEMENT,MAP),"infantry does not block vehicle deployment")
+	var obstacle_map: PrototypeMapDefinition = MAP.duplicate(true)
+	obstacle_map.obstacles.append(Rect2(-12.2,111.8,0.4,0.4))
+	check(not MovementSimulation.placement_available(infantry,center,{},MOVEMENT,obstacle_map),"infantry cannot deploy in static obstacle")
+	check(not MovementSimulation.placement_available(candidate,center,{},MOVEMENT,obstacle_map),"vehicle cannot deploy in static obstacle")
+	check(not MovementSimulation.placement_available(candidate,center+Vector3(0.6,0,0),{},MOVEMENT,obstacle_map),"vehicle movement circle overlaps static obstacle")
+	check(MovementSimulation.placement_available(infantry,center+Vector3(0.3,0,0),{},MOVEMENT,obstacle_map),"infantry outside obstacle needs no deployment clearance")
+	var simulation := MovementSimulation.new(MOVEMENT)
+	check(simulation.initialize_navigation(),"placement shared navigation initializes")
+	simulation.add_unit(infantry)
+	simulation.add_unit(vehicle)
+	check(simulation.resolve_spawn_position(center,infantry) == service.find_spawn_position(infantry_definition,center,occupied),"free spawn and purchased spawn share infantry legality")
+	var circular_point := center+Vector3(0.75,0,0.75)
+	check(simulation.resolve_spawn_position(circular_point,candidate) == circular_point,"free spawn uses the same vehicle circle predicate")
 
 func _navigation_and_server_checks() -> void:
 	var nav := StaticNavigationGrid.new()

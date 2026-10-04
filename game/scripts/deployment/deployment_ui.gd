@@ -12,7 +12,6 @@ var _awaiting_id := 0
 var _network: Node
 var _camera: Camera3D
 var _ground: Callable
-var _category: OptionButton
 var _point: OptionButton
 var _move_mode: OptionButton
 var _rows: VBoxContainer
@@ -43,12 +42,6 @@ func _ready() -> void:
 	box.add_child(title)
 	_balance = Label.new()
 	box.add_child(_balance)
-	_category = OptionButton.new()
-	_category.add_item("步兵", 0)
-	_category.add_item("装甲车辆", 1)
-	_category.focus_mode = Control.FOCUS_NONE
-	_category.item_selected.connect(func(_index: int): _refresh_rows())
-	box.add_child(_category)
 	_point = OptionButton.new()
 	_point.focus_mode = Control.FOCUS_NONE
 	_point.item_selected.connect(func(_index: int): _refresh_rows())
@@ -119,10 +112,7 @@ func _refresh_rows() -> void:
 	# Keep button identities through frequent countdown snapshots. Replacing a
 	# pressed button before release loses its pressed signal and blocks buying.
 	var live := {}
-	var category := "infantry" if _category.selected == 0 else "armored_vehicle"
 	for entry: Dictionary in state.get("catalog", []):
-		if entry.category != category:
-			continue
 		var counts: Dictionary = state.cards[entry.config_id]
 		var remaining: int = maxi(0, int(entry.maximum_present) - int(counts.present) - int(counts.pending))
 		live[entry.config_id] = true
@@ -134,7 +124,7 @@ func _refresh_rows() -> void:
 			_purchase_buttons[entry.config_id] = created
 		var button: Button = _purchase_buttons[entry.config_id]
 		button.text = "%s\n部署 %d · 价值 %d · 剩余 %d" % [_name_for(entry.config_id),entry.sortie_points,entry.value_points,remaining]
-		button.disabled = owns_commands() or remaining == 0 or state.balance < entry.sortie_points or not _point_allowed(category)
+		button.disabled = owns_commands() or remaining == 0 or state.balance < entry.sortie_points or _point.selected < 0
 	for id: String in _purchase_buttons.keys():
 		if not live.has(id):
 			var obsolete := _purchase_buttons[id]
@@ -142,12 +132,6 @@ func _refresh_rows() -> void:
 			obsolete.queue_free()
 			_purchase_buttons.erase(id)
 	_point.disabled = owns_commands()
-
-func _point_allowed(category: String) -> bool:
-	if _point.selected < 0:
-		return false
-	var point: Dictionary = state.points[_point.selected]
-	return point.allowed_categories.is_empty() or point.allowed_categories.has(category)
 
 func buy(config_id: String) -> void:
 	if owns_commands() or _point.selected < 0 or state.is_empty():

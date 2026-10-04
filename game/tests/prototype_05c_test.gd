@@ -42,7 +42,7 @@ func run() -> void:
 	ui.place(Vector3(10,0,110))
 	respond()
 	await process_frame
-	var button: Button = ui._rows.get_child(0)
+	var button: Button = ui._purchase_buttons["test.rifle"]
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
@@ -54,7 +54,7 @@ func run() -> void:
 	click.pressed = false
 	root.push_input(click,true)
 	check(requests.size() == 1,"purchase survives countdown snapshot between mouse press and release")
-	check(is_instance_valid(button) and button == ui._rows.get_child(0),"purchase button identity remains stable")
+	check(is_instance_valid(button) and button == ui._purchase_buttons["test.rifle"],"purchase button identity remains stable")
 	var b: int = respond().order_id
 	ui.buy("test.rifle")
 	check(requests.is_empty() and ui.held_id == b,"only held card blocks buying")
@@ -191,7 +191,7 @@ func server_checks() -> void:
 	model._peer_players[99] = 2
 	var a: Dictionary = model.deployment.buy_order(1,"test.rifle","ground.west")
 	model.deployment.place_order(1,a.order_id,Vector3(10,0,110))
-	var b: Dictionary = model.deployment.buy_order(1,"test.unarmed","ground.west")
+	var b: Dictionary = model.deployment.buy_order(1,"test.rifle","ground.west")
 	model.deployment.place_order(1,b.order_id,Vector3(12,0,110))
 	var held: Dictionary = model.deployment.buy_order(2,"test.rifle","ground.east")
 	check(a.ok and b.ok and held.ok,"production economy multi orders")
@@ -208,5 +208,5 @@ func server_checks() -> void:
 	model._pending_sessions.append({"type":"leave","peer_id":99})
 	model._run_server_tick(PackedInt32Array([42]))
 	check(model.deployment._orders[held.order_id].status == "cancelled" and model.deployment.export_player(2).balance == 1000,"disconnect cancels unfinished orders and refunds owner")
-	check(model.deployment.card_counts(1,"test.rifle").present == 1,"foreign disconnect leaves live units intact")
+	check(model.deployment.card_counts(1,"test.rifle").present == 2,"foreign disconnect leaves live units intact")
 	model.free()
