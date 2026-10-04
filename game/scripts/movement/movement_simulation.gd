@@ -17,6 +17,49 @@ var _final_yaws: Dictionary[int, float] = {}
 var _move_modes: Dictionary[int, int] = {}
 var _navigation := StaticNavigationGrid.new()
 var _deployment_navigation: Dictionary = {}
+var _blocked_seconds: Dictionary[int, float] = {}
+# Temporary retry cadence, not a balance rule.
+var dynamic_retry_seconds := 1.0
+var _map_definition: PrototypeMapDefinition
+var profile: Dictionary = {}
+var attack_facing_requests: Dictionary = {}
+
+
+func navigation_for(state: UnitState, dynamic: bool = true, minimum_width: float = 0.0) -> StaticNavigationGrid:
+	var width := maxf(state.movement_radius() * 2.0, minimum_width)
+	var navigation := _navigation
+	if not is_equal_approx(width, _config.unit_width):
+		if not _deployment_navigation.has(width):
+			var sized_config: MovementConfig = _config.duplicate(true)
+			sized_config.unit_width = width
+			var sized := StaticNavigationGrid.new()
+			sized.initialize(sized_config, _map_definition)
+			_deployment_navigation[width] = sized
+		navigation = _deployment_navigation[width]
+	var centers: Array[Vector3] = []
+	var radii: Array[float] = []
+	if dynamic and state.blocks_movement():
+		for other: UnitState in _units.values():
+			if other.unit_id != state.unit_id and other.blocks_movement():
+				centers.append(other.position)
+				radii.append(state.movement_radius() + other.movement_radius())
+	navigation.profile = profile
+	navigation.configure_dynamic(centers,radii)
+	return navigation
+
+
+func translation_clear(state: UnitState, start: Vector3, end: Vector3) -> bool:
+	if not profile.is_empty(): profile["swept_checks"] = profile.get("swept_checks",0) + 1
+	if not state.blocks_movement(): return true
+	var a := Vector2(start.x,start.z)
+	var b := Vector2(end.x,end.z)
+	for other: UnitState in _units.values():
+		if not profile.is_empty(): profile["swept_unit_scans"] = profile.get("swept_unit_scans",0) + 1
+		if other.unit_id == state.unit_id or not other.blocks_movement(): continue
+		var center := Vector2(other.position.x,other.position.z)
+		var nearest := Geometry2D.get_closest_point_to_segment(center,a,b)
+		if nearest.distance_to(center) < state.movement_radius() + other.movement_radius() - 0.00001: return false
+	return true
 
 
 func _init(config: MovementConfig) -> void:
@@ -24,10 +67,13 @@ func _init(config: MovementConfig) -> void:
 
 
 func add_unit(state: UnitState) -> void:
+	state.initialize_spatial()
 	_units[state.unit_id] = state
 
 
 func initialize_navigation(definition: PrototypeMapDefinition = MAP_DEFINITION) -> bool:
+	_map_definition = definition
+	_deployment_navigation.clear()
 	return _navigation.initialize(_config, definition)
 
 
@@ -35,20 +81,16 @@ func is_navigation_ready() -> bool:
 	return _navigation.is_ready()
 
 
-func resolve_spawn_position(position: Vector3) -> Variant:
+func resolve_spawn_position(position: Vector3, state: UnitState = null) -> Variant:
+	if state != null: return navigation_for(state).nearest_walkable_position(position)
+	_navigation.configure_dynamic([],[])
 	return _navigation.nearest_walkable_position(position)
 
 
 func deploy_move(state: UnitState, destination: Vector3, mode: int, width: float, map: PrototypeMapDefinition = MAP_DEFINITION) -> Dictionary:
-	var navigation := _navigation
-	if not is_equal_approx(width, _config.unit_width):
-		if not _deployment_navigation.has(width):
-			var config: MovementConfig = _config.duplicate(true)
-			config.unit_width = width
-			var sized := StaticNavigationGrid.new()
-			if not sized.initialize(config, map): return {"notice":"no usable movement path", "target":state.position}
-			_deployment_navigation[width] = sized
-		navigation = _deployment_navigation[width]
+	if not _valid_speeds(state): return {"notice":"invalid unit spatial configuration", "target":state.position}
+	# The old deployment width remains a conservative lower bound for this entry.
+	var navigation := navigation_for(state,true,width)
 	var target := Vector3(destination.x, state.position.y, destination.z)
 	var path := navigation.deployment_path(state.position, target, mode == MoveMode.FAST, state)
 	if path.size() < 2 or path[0].is_equal_approx(path[path.size() - 1]):
@@ -79,7 +121,7 @@ func request_move(unit_id: int, sender_peer_id: int, target: Vector3, mode: int 
 		return "unknown unit"
 	if _units[unit_id].owner_peer_id != sender_peer_id:
 		return "not owner"
-	if _units[unit_id].health <= 0.0 or (mode == MoveMode.ATTACK and _units[unit_id].weapon == null):
+	if _units[unit_id].health <= 0.0 or (mode == MoveMode.ATTACK and not _units[unit_id].is_armed()):
 		return "unit cannot execute command"
 	if mode == MoveMode.REVERSE and not _can_reverse(_units[unit_id]):
 		return "unit cannot reverse"
@@ -94,7 +136,7 @@ func request_move(unit_id: int, sender_peer_id: int, target: Vector3, mode: int 
 	var unit := _units[unit_id]
 	if not _valid_speeds(unit):
 		return "invalid unit speeds"
-	var path := _navigation.find_path(unit.position, destination, [], 0.0, mode == MoveMode.FAST, unit)
+	var path := navigation_for(unit).find_path(unit.position, destination, [], 0.0, mode == MoveMode.FAST, unit)
 	if path.is_empty():
 		return "no reachable destination"
 	_assign_path(unit_id, path, mode)
@@ -125,7 +167,7 @@ func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vecto
 	for unit_id: int in unit_ids:
 		if _units.has(unit_id) and _units[unit_id].owner_peer_id == sender_peer_id \
 			and _units[unit_id].health > 0.0 \
-			and (mode != MoveMode.ATTACK or _units[unit_id].weapon != null) \
+			and (mode != MoveMode.ATTACK or _units[unit_id].is_armed()) \
 			and (mode != MoveMode.REVERSE or _can_reverse(_units[unit_id])):
 			eligible[unit_id] = true
 	var ids: Array[int] = []
@@ -143,9 +185,12 @@ func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vecto
 	center /= selected.size()
 	var final_yaw := _command_yaw(_units[ids[0]], target - center, mode, facing)
 	var side := Vector3(cos(final_yaw), 0, -sin(final_yaw))
-	var spacing := _config.unit_width + _config.destination_gap
+	var largest_width := _config.unit_width
+	for id: int in ids:
+		largest_width = maxf(largest_width,_units[id].movement_radius() * 2.0)
+	var spacing := largest_width + _config.destination_gap
 	var half_width := (ids.size() - 1) * spacing * 0.5
-	var clearance := _config.unit_width * 0.5 + _config.obstacle_margin
+	var clearance := largest_width * 0.5 + _config.obstacle_margin
 	var extent_x := absf(side.x) * half_width + clearance
 	var extent_z := absf(side.z) * half_width + clearance
 	if extent_x * 2 > _config.maximum_xz.x - _config.minimum_xz.x or extent_z * 2 > _config.maximum_xz.y - _config.minimum_xz.y:
@@ -163,7 +208,7 @@ func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vecto
 		if not _valid_speeds(_units[unit_id]):
 			failed.append(unit_id)
 			continue
-		var path := _navigation.find_path(_units[unit_id].position, destination, reserved, spacing, mode == MoveMode.FAST, _units[unit_id])
+		var path := navigation_for(_units[unit_id]).find_path(_units[unit_id].position, destination, reserved, spacing, mode == MoveMode.FAST, _units[unit_id])
 		if path.is_empty():
 			failed.append(unit_id)
 			continue
@@ -192,10 +237,27 @@ func move_paths(unit_ids: Array[int]) -> Array[PackedVector3Array]:
 
 func advance(delta: float) -> Dictionary[int, Vector3]:
 	var changed: Dictionary[int, Vector3] = {}
-	for unit_id: int in _targets.keys():
+	for id: int in attack_facing_requests:
+		if _units.has(id) and not _targets.has(id):
+			var previous := _units[id].yaw
+			_turn(_units[id],attack_facing_requests[id],delta)
+			if previous != _units[id].yaw: changed[id] = _units[id].position
+	var ordered := _targets.keys()
+	ordered.sort()
+	for unit_id: int in ordered:
 		if _engaging.has(unit_id):
 			continue
 		var state := _units[unit_id]
+		if _blocked_seconds.has(unit_id):
+			_blocked_seconds[unit_id] += delta
+			if _blocked_seconds[unit_id] >= dynamic_retry_seconds:
+				if not profile.is_empty(): profile["repath_queries"] = profile.get("repath_queries",0) + 1
+				_blocked_seconds[unit_id] = 0.0
+				var replacement := navigation_for(state).find_path(state.position, _targets[unit_id], [], 0.0, _move_modes[unit_id] == MoveMode.FAST, state)
+				if replacement.size() >= 2:
+					_paths[unit_id] = replacement
+					_path_indices[unit_id] = 1
+					_targets[unit_id] = replacement[replacement.size() - 1]
 		var time_left := delta
 		var path := _paths[unit_id]
 		var index := _path_indices[unit_id]
@@ -209,7 +271,7 @@ func advance(delta: float) -> Dictionary[int, Vector3]:
 			var desired := atan2(-direction.x, -direction.z)
 			if _reverse_moves.has(unit_id):
 				desired = wrapf(desired + PI, -PI, PI)
-			var turn_time := _turn(state, desired, time_left)
+			var turn_time := 0.0 if _reverse_moves.has(unit_id) and not state.runtime_weapons.is_empty() else _turn(state, desired, time_left)
 			time_left = maxf(0, time_left - turn_time)
 			if time_left <= 0:
 				break
@@ -220,6 +282,12 @@ func advance(delta: float) -> Dictionary[int, Vector3]:
 				if _reverse_moves.has(unit_id):
 					speed = state.reverse_speed_on(_navigation.surface.is_hardened((state.position + end) * 0.5))
 				var duration := state.position.distance_to(end) / speed
+				var next_position := end if duration <= time_left else state.position.move_toward(end, speed * time_left)
+				if not translation_clear(state,state.position,next_position):
+					if not _blocked_seconds.has(unit_id): _blocked_seconds[unit_id] = 0.0
+					time_left = 0.0
+					break
+				_blocked_seconds.erase(unit_id)
 				if duration <= time_left:
 					state.position = end
 					time_left -= duration
@@ -239,10 +307,13 @@ func advance(delta: float) -> Dictionary[int, Vector3]:
 			_turn(state, _final_yaws.get(unit_id, state.yaw), time_left)
 			if absf(wrapf(_final_yaws.get(unit_id, state.yaw) - state.yaw, -PI, PI)) < 0.00001:
 				_clear_move(unit_id)
+	for state: UnitState in _units.values():
+		state.advance_members(delta)
 	return changed
 
 
 func _clear_move(unit_id: int) -> void:
+	_blocked_seconds.erase(unit_id)
 	_move_modes.erase(unit_id)
 	_final_yaws.erase(unit_id)
 	_reverse_moves.erase(unit_id)
@@ -273,6 +344,7 @@ func active_command_ids() -> Array[int]:
 
 
 func _valid_speeds(unit: UnitState) -> bool:
+	if unit.definition != null and not unit.definition.spatial_valid(): return false
 	var paved := unit.speed_on(true, _config.speed)
 	var unpaved := unit.speed_on(false, _config.speed)
 	var turn_rate := unit.definition.turn_speed_degrees if unit.definition != null else 180.0
@@ -331,6 +403,7 @@ func stop_owner(owner_peer_id: int) -> void:
 
 
 func _command_yaw(unit: UnitState, direction: Vector3, mode: int, facing: Vector3) -> float:
+	if mode == MoveMode.REVERSE and not unit.runtime_weapons.is_empty(): return unit.yaw
 	if not facing.is_zero_approx():
 		return atan2(-facing.x, -facing.z)
 	direction.y = 0

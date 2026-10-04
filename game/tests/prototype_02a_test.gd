@@ -74,7 +74,7 @@ func _movement_cooldown_and_death() -> void:
 	var original_route := movement.move_paths([1])[0]
 	var result := combat.advance(0.1, movement)
 	_check(result["shots"].size() == 2, "mobile player and stationary rebel fire; moving stationary and unarmed do not")
-	_check(enemy.health == 90.0 and stationary.health == 90.0, "immediate server damage and rebel retaliation")
+	_check(enemy.health == 35.0 and stationary.health == 35.0, "server member damage and rebel retaliation")
 	_check(movement.move_paths([1])[0] == original_route, "combat neither pursues nor replaces movement")
 	_check(combat.advance(0.5, movement)["shots"].is_empty(), "cooldown blocks early shot")
 	_check(combat.advance(0.5, movement)["shots"].size() == 2, "cooldown expires independently")
@@ -82,7 +82,7 @@ func _movement_cooldown_and_death() -> void:
 	result = combat.advance(1.0, movement)
 	_check(result["shots"].size() == 3, "stationary weapon fires after stopping; unarmed never fires")
 	_check(movement.request_move(4, 0, Vector3(16, 0, 104)).is_empty(), "victim has movement before death")
-	enemy.health = 10.0
+	enemy.health = 5.0
 	result = combat.advance(1.0, movement)
 	_check(result["deaths"] == [4] and enemy.health == 0.0, "lethal damage yields one death")
 	_check(not combat._units.has(4) and not combat._cooldowns.has(4) and not movement.is_moving(4), "death removes attack cooldown and movement")
@@ -93,11 +93,12 @@ func _movement_cooldown_and_death() -> void:
 func _server_snapshot_checks() -> void:
 	# Exercise the server tick without transport or client startup.
 	var network := root.get_node("NetworkManager")
+	network.legacy_combat_fixture_enabled = true
 	_check(network._movement.initialize_navigation(), "server navigation")
 	network._initialize_rebels()
 	_check(network.live_snapshots().size() == 3, "rebels initialized once")
 	var victim: UnitState = network._authoritative_units[1]
-	victim.health = 10.0
+	victim.health = 5.0
 	var attacker := _state(100, 42, 1, victim.position + Vector3(1, 0, 0), MOBILE)
 	network._authoritative_units[100] = attacker
 	network._movement.add_unit(attacker)

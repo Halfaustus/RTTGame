@@ -168,6 +168,7 @@ func _navigation_and_server_checks() -> void:
 	var stopped := movement.deploy_move(state,Vector3(12,0,112),0,1,pocket)
 	check(stopped.target == state.position and not stopped.notice.is_empty() and not movement.has_active_moves(),"no reachable path leaves unit at spawn with notice")
 	var model = load("res://scripts/networking/network_manager.gd").new()
+	model.legacy_combat_fixture_enabled = true # Explicit historical damage fixture.
 	root.add_child(model)
 	model._ensure_deployment_ready()
 	model._movement.initialize_navigation()
@@ -196,11 +197,11 @@ func _navigation_and_server_checks() -> void:
 	display.orders[0].remaining_seconds = 1.5
 	ui.apply_state(display)
 	ui._process(10)
-	check(ui.state.orders[0].remaining_seconds == 1.5 and ui._markers[id].text.contains("1.5"),"UI displays server time without local countdown completion")
+	check(ui.state.orders[0].remaining_seconds == 1.5 and ui._markers[id].get_meta("remaining_seconds") == 1.5,"UI consumes server time without local countdown completion")
 	display.orders[0].status = "waiting"
 	ui.apply_state(display)
 	ui._process(0)
-	check(not ui._markers[id].disabled and ui._markers[id].text.contains("等待"),"waiting marker can be picked up")
+	check(not ui._markers[id].disabled and ui._markers[id].get_meta("order_status") == "waiting","waiting marker can be picked up")
 	ui.apply_state(final_state)
 	check(not ui._markers.has(id),"generated snapshot removes deployment card")
 	world.free()

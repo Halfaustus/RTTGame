@@ -4,6 +4,9 @@ signal tick_completed(tick: int, records: Array[Dictionary])
 signal deployment_state_received(state: Dictionary)
 signal deployment_result_received(result: Dictionary)
 signal deployment_event(event: Dictionary)
+signal weapon_fire_received(event: Dictionary)
+signal projectile_spawn_received(event: Dictionary)
+signal projectile_terminal_received(event: Dictionary)
 
 signal unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3)
 signal unit_positions_received(unit_ids: Array[int], positions: Array[Vector3])
@@ -19,6 +22,7 @@ signal unit_orientations_received(unit_ids: Array[int], yaws: Array[float])
 
 const DEFAULT_PORT: int = 7777
 const MAX_CLIENTS: int = 16
+const INTERNAL_STATE_REPLICATION_HZ := 10 # Temporary 0.5B parameter; unchanged.
 const MOVEMENT_CONFIG: MovementConfig = preload("res://data/prototype_movement.tres")
 const COMBAT_CONFIG: CombatConfig = preload("res://data/prototype_combat.tres")
 const DEPLOYMENT_CONFIG: DeploymentConfig = preload("res://data/prototype_deployment.tres")
@@ -49,11 +53,20 @@ var _movement := MovementSimulation.new(MOVEMENT_CONFIG)
 var _pending_positions: Dictionary[int, Vector3] = {}
 var _replication_elapsed: float = 0.0
 var _combat := CombatSimulation.new(MovementSimulation.MAP_DEFINITION)
+var _aiming := AimingSimulation.new()
+var _fire := FireSimulation.new()
+var _projectiles: ProjectileSimulation
+var _previous_ballistic_positions: Dictionary = {}
+var legacy_combat_fixture_enabled := false # Explicit historical test opt-in only.
+var _weapon_presets: Array[UnitDefinition] = [preload("res://data/05d/vehicle_a.tres"),preload("res://data/05d/assault.tres"),preload("res://data/05d/defense.tres")]
 var _rebels_initialized: bool = false
 var _player_spawn_index: int = 1
 
 
 func _ready() -> void:
+	presentation.weapon_fire_received.connect(weapon_fire_received.emit)
+	presentation.projectile_spawn_received.connect(projectile_spawn_received.emit)
+	presentation.projectile_terminal_received.connect(projectile_terminal_received.emit)
 	deployment.state_changed.connect(func(player_id: int): _dirty_deployment[player_id] = true)
 	deployment.event_emitted.connect(deployment_event.emit)
 	presentation.unit_spawn_received.connect(unit_spawn_received.emit)
@@ -181,6 +194,11 @@ func _apply_peer_join(peer_id: int) -> void:
 	if multiplayer.get_peers().has(peer_id):
 		for snapshot: Dictionary in live_snapshots():
 			_queue_replication("_receive_unit_snapshot", [snapshot], peer_id)
+		if _projectiles != null:
+			var active_spawns: Array[Dictionary] = []
+			for projectile: ProjectileState in _projectiles.active.values(): active_spawns.append(projectile.spawn_event())
+			active_spawns.sort_custom(func(a,b): return a.emission_order < b.emission_order)
+			if not active_spawns.is_empty(): _queue_replication("_receive_projectile_events",[active_spawns,[]],peer_id)
 	for index: int in MOVEMENT_CONFIG.units_per_peer:
 		var unit_id := _next_unit_id
 		_next_unit_id += 1
@@ -191,7 +209,12 @@ func _apply_peer_join(peer_id: int) -> void:
 			continue
 		var state := UnitState.new(unit_id, peer_id, spawn)
 		state.owner_player_id = player_id
-		state.configure(COMBAT_CONFIG.player_team_id, COMBAT_CONFIG.player_definitions[index % COMBAT_CONFIG.player_definitions.size()])
+		state.configure(COMBAT_CONFIG.player_team_id, COMBAT_CONFIG.player_definitions[index % COMBAT_CONFIG.player_definitions.size()] if legacy_combat_fixture_enabled else _weapon_presets[index % _weapon_presets.size()])
+		var sized_spawn: Variant = _movement.resolve_spawn_position(state.position, state)
+		if sized_spawn == null:
+			push_error("No valid unit-sized player spawn.")
+			continue
+		state.position = sized_spawn
 		_authoritative_units[unit_id] = state
 		state.generated_tick = timeline.tick
 		deployment.register_live_unit(unit_id, player_id, state.definition, state.generated_tick)
@@ -200,7 +223,7 @@ func _apply_peer_join(peer_id: int) -> void:
 		timeline.append("event", "spawn", ReplayFormat.unit_state(state, _movement))
 		print("Authoritative unit %d created. Owner peer: %d; match player: %d" % [unit_id, peer_id, player_id])
 		if not multiplayer.get_peers().is_empty():
-			_queue_replication("_receive_unit_snapshot", [state.snapshot()])
+			_queue_replication("_receive_unit_snapshot", [_presentation_snapshot(state)])
 
 
 func _initialize_rebels() -> void:
@@ -214,7 +237,12 @@ func _initialize_rebels() -> void:
 			continue
 		var state := UnitState.new(_next_unit_id, 0, spawn)
 		_next_unit_id += 1
-		state.configure(COMBAT_CONFIG.rebel_team_id, COMBAT_CONFIG.rebel_definition)
+		state.configure(COMBAT_CONFIG.rebel_team_id, COMBAT_CONFIG.rebel_definition if legacy_combat_fixture_enabled else _weapon_presets[1])
+		var sized_spawn: Variant = _movement.resolve_spawn_position(state.position, state)
+		if sized_spawn == null:
+			push_error("No valid unit-sized rebel spawn.")
+			continue
+		state.position = sized_spawn
 		_authoritative_units[state.unit_id] = state
 		_movement.add_unit(state)
 		_combat.add_unit(state)
@@ -224,7 +252,7 @@ func live_snapshots() -> Array[Dictionary]:
 	var snapshots: Array[Dictionary] = []
 	for state: UnitState in _authoritative_units.values():
 		if state.health > 0.0:
-			snapshots.append(state.snapshot())
+			snapshots.append(_presentation_snapshot(state))
 	return snapshots
 
 
@@ -233,6 +261,15 @@ func _receive_unit_snapshot(state: Dictionary) -> void:
 	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1:
 		return
 	presentation.apply_live_unit(state)
+
+func _presentation_snapshot(state: UnitState) -> Dictionary:
+	var result := state.snapshot()
+	result.definition_id = state.definition.resource_path
+	var count := 0
+	for member: SoldierState in state.members:
+		if member.health > 0: count += 1
+	result.member_count = count
+	return result
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -288,6 +325,7 @@ func _apply_stop(unit_ids: Array[int], sender: int) -> Dictionary:
 	var positions: Array[Vector3] = []
 	for unit_id: int in accepted:
 		positions.append(_authoritative_units[unit_id].position)
+		for instance: RuntimeWeaponInstance in _authoritative_units[unit_id].runtime_weapons: instance.clear_target()
 		# Remove any older buffered position before broadcasting the current stop position.
 		_pending_positions.erase(unit_id)
 	return {"unit_ids": accepted, "positions": positions}
@@ -365,15 +403,47 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	var delta := timeline.seconds_per_tick()
 	for id: int in _movement.active_command_ids():
 		_dirty_units[id] = true
-	_movement.update_attack_engagement(_combat)
+	_aiming.units = _authoritative_units
+	# The current prototype replicates all live map units; there is no fog system.
+	_aiming.visibility = func(_owner: UnitState, target: AttackTarget): return target.kind == AttackTarget.Kind.FORCED_GROUND or target.valid(_authoritative_units)
+	_aiming.clear_path = _combat.has_line_of_sight
+	_aiming.moving = _movement.is_moving
+	_movement.attack_facing_requests = _aiming.hull_requests()
+	for state: UnitState in _authoritative_units.values():
+		if not _previous_ballistic_positions.has(state.unit_id): _previous_ballistic_positions[state.unit_id] = state.position
+	if legacy_combat_fixture_enabled: _movement.update_attack_engagement(_combat)
 	var changed := _movement.advance(delta)
+	_aiming.target_velocities.clear()
+	for state: UnitState in _authoritative_units.values():
+		_aiming.target_velocities[state.unit_id] = (state.position-_previous_ballistic_positions[state.unit_id])/delta
+		_previous_ballistic_positions[state.unit_id] = state.position
+	for id: int in _previous_ballistic_positions.keys():
+		if not _authoritative_units.has(id): _previous_ballistic_positions.erase(id)
 	_pending_positions.merge(changed, true)
 	for id: int in changed:
 		_dirty_units[id] = true
 	# A target entered range during this tick: park before applying firing eligibility.
-	_movement.update_attack_engagement(_combat)
+	if legacy_combat_fixture_enabled: _movement.update_attack_engagement(_combat)
 	timeline.enter_phase("combat")
-	var combat_result := _combat.advance(delta, _movement)
+	_aiming.advance(delta)
+	if not legacy_combat_fixture_enabled:
+		if _projectiles == null:
+			_projectiles = ProjectileSimulation.new()
+			_projectiles.bounds = Rect2(MOVEMENT_CONFIG.minimum_xz,MOVEMENT_CONFIG.maximum_xz-MOVEMENT_CONFIG.minimum_xz)
+			_projectiles.collision.initialize_map(MovementSimulation.MAP_DEFINITION,MOVEMENT_CONFIG)
+		_projectiles.collision.sync_units(_authoritative_units)
+		_fire.fire_path_permission = _projectiles.collision.fire_clear
+		var terminals := _projectiles.advance(delta,timeline.tick) # Advance older shots before spawning end-of-tick shots.
+		for event: Dictionary in terminals: projectile_terminal_received.emit(event.duplicate(true))
+		if not terminals.is_empty() and not connected_peers.is_empty(): _queue_replication("_receive_projectile_events",[[],terminals])
+		var emissions := _fire.advance(delta,timeline.tick,_aiming)
+		var spawns := _projectiles.consume(emissions)
+		for event: Dictionary in spawns: projectile_spawn_received.emit(event.duplicate(true))
+		if not spawns.is_empty() and not connected_peers.is_empty(): _queue_replication("_receive_projectile_events",[spawns,[]])
+		for emission: Dictionary in emissions: weapon_fire_received.emit(emission.duplicate(true))
+		if not emissions.is_empty() and not connected_peers.is_empty(): _queue_replication("_receive_weapon_fires",[emissions])
+	# New emissions never enter legacy 'shot' (absolute HP result) or frozen v1.
+	var combat_result: Dictionary = _combat.advance(delta, _movement) if legacy_combat_fixture_enabled else {"shots":[],"deaths":[]}
 	for shot: Dictionary in combat_result["shots"]:
 		_dirty_units[shot.target_id] = true
 		var recorded_shot := shot.duplicate(true)
@@ -400,7 +470,11 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	# Future recorder consumes completed state/events here; no whole-match buffer in A.
 	tick_completed.emit(timeline.tick, timeline.records.duplicate(true))
 	timeline.enter_phase("replication")
-	if timeline.tick % maxi(1, timeline.tick_hz / 10) == 0:
+	if timeline.tick % maxi(1, timeline.tick_hz / INTERNAL_STATE_REPLICATION_HZ) == 0:
+		if not connected_peers.is_empty():
+			var structures: Array[Dictionary] = []
+			for state: UnitState in _authoritative_units.values(): structures.append(state.structure_snapshot())
+			_queue_replication("_receive_unit_structures", [structures])
 		for peer_id: int in _peer_players:
 			var player_id := _peer_players[peer_id]
 			if _dirty_deployment.has(player_id):
@@ -421,6 +495,23 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 		_replication_elapsed = 0.0
 	_flush_replication()
 	timeline.finish_tick()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_unit_structures(states: Array) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	for state: Dictionary in states: presentation.apply_live_structure(state)
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_weapon_fires(events: Array) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	for event: Dictionary in events: presentation.apply_fire_event(event)
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_projectile_events(spawns: Array, terminals: Array) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	for event: Dictionary in spawns: presentation.apply_projectile_spawn(event)
+	for event: Dictionary in terminals: presentation.apply_projectile_terminal(event)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -476,6 +567,7 @@ func _consume_sessions(connected_peers: PackedInt32Array) -> void:
 		elif _peer_players.has(peer_id):
 			var player_id := _peer_players[peer_id]
 			_peer_players.erase(peer_id)
+			deployment.cancel_player_orders(player_id)
 			_movement.stop_owner(peer_id)
 			for unit: UnitState in _authoritative_units.values():
 				if unit.owner_player_id == player_id:
@@ -604,7 +696,25 @@ func _ensure_deployment_ready() -> bool:
 	if not error.is_empty():
 		push_error("Deployment configuration rejected: " + error)
 		return false
+	if not legacy_combat_fixture_enabled:
+		# Preserve existing explicitly temporary prices/card IDs; no new balancing.
+		deployment._catalog["test.armored"].definition = _weapon_presets[0]
+		deployment._catalog["test.rifle"].definition = _weapon_presets[1]
 	return true
+
+
+# Server-only binding API for the existing command/target layer, never UI identity.
+func bind_weapon_target(sender_peer: int, unit_id: int, instance_id: String, target_id: int) -> bool:
+	if not multiplayer.is_server(): return false
+	if not _authoritative_units.has(unit_id) or not _authoritative_units.has(target_id): return false
+	var owner: UnitState = _authoritative_units[unit_id]
+	var target: UnitState = _authoritative_units[target_id]
+	if owner.owner_peer_id != sender_peer or not _peer_players.has(sender_peer) or owner.owner_player_id != _peer_players[sender_peer] or target.team_id == owner.team_id: return false
+	for instance: RuntimeWeaponInstance in owner.runtime_weapons:
+		if instance.instance_id == instance_id:
+			instance.bind_target(AttackTarget.unit(target))
+			return true
+	return false
 
 
 func request_deployment(config_id: String, point_id: String, destination: Vector3) -> void:
@@ -718,7 +828,7 @@ func _spawn_deployment(order: Dictionary, position: Vector3, entry: Dictionary, 
 	# Existing v1 unit/path state and spawn event suffice; economic/order state is
 	# deliberately absent from the frozen replay format.
 	timeline.append("event", "spawn", ReplayFormat.unit_state(state, _movement))
-	_queue_replication("_receive_unit_snapshot", [state.snapshot()])
+	_queue_replication("_receive_unit_snapshot", [_presentation_snapshot(state)])
 	var ids: Array[int] = [state.unit_id]
 	if peer_id != 0:
 		if _movement._targets.has(state.unit_id):

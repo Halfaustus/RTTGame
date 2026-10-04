@@ -10,10 +10,145 @@ var _config: MovementConfig
 var _blocked: Array[Rect2] = []
 var _clearance: float
 var _initialized: bool = false
+var _dynamic_centers: Array[Vector3] = []
+var _dynamic_radii: Array[float] = []
+var _disabled_edges: Array[Vector2i] = []
+var _disabled_points: Array[int] = []
+var _static_connections: Dictionary = {}
+var _circle_overlays: Dictionary = {}
+var _dynamic_cells: Dictionary = {}
+var _dynamic_cell_size := 1.0
+var profile: Dictionary = {}
+
+
+func _count(key: String, amount: int = 1) -> void:
+	if not profile.is_empty(): profile[key] = profile.get(key, 0) + amount
+
+
+# Applied only for a path query/retry, never every simulation frame.
+func configure_dynamic(centers: Array[Vector3], radii: Array[float]) -> void:
+	var began := Time.get_ticks_usec() if not profile.is_empty() else 0
+	_count("occupancy_configurations")
+	# A clean/unchanged overlay needs no graph traversal (including infantry).
+	if centers == _dynamic_centers and radii == _dynamic_radii: return
+	_dynamic_centers = centers.duplicate()
+	_dynamic_radii = radii.duplicate()
+	_index_dynamic_circles()
+	var points := {}
+	var edges := {}
+	var current_overlays := {}
+	for circle: int in centers.size():
+		var center := Vector2(centers[circle].x,centers[circle].z)
+		# Preserve float radius precision; never round spatial cache keys.
+		var key := [center,radii[circle]]
+		var overlay: Dictionary
+		if _circle_overlays.has(key):
+			overlay = _circle_overlays[key]
+			_count("circle_cache_hits")
+		else:
+			overlay = _circle_overlay(center,radii[circle])
+		current_overlays[key] = overlay
+		points.merge(overlay.points)
+		edges.merge(overlay.edges)
+	# Retain only the last nonempty request, so positions cannot accumulate forever.
+	# Empty infantry queries restore the graph but may reuse static circle geometry.
+	if not current_overlays.is_empty(): _circle_overlays = current_overlays
+	for id: int in _disabled_points:
+		if not points.has(id): _routes.set_point_disabled(id,false)
+	for edge: Vector2i in _disabled_edges:
+		if not edges.has(edge): _routes.connect_points(edge.x,edge.y)
+	for id: int in points:
+		if not _routes.is_point_disabled(id): _routes.set_point_disabled(id,true)
+	for edge: Vector2i in edges:
+		if _routes.are_points_connected(edge.x,edge.y): _routes.disconnect_points(edge.x,edge.y)
+	_disabled_points.assign(points.keys())
+	_disabled_edges.assign(edges.keys())
+	if not profile.is_empty(): _count("occupancy_configuration_us", Time.get_ticks_usec() - began)
+
+
+func _circle_overlay(center: Vector2, footprint_radius: float) -> Dictionary:
+	_count("circle_cache_misses")
+	var points := {}
+	var edges := {}
+	# Existing grid geometry is the broad phase. Every static edge is at most
+	# sqrt(2)*cell long: expand each circle by that length so even a crossed edge
+	# with both endpoints outside the circle is included. Exact predicates remain
+	# unchanged; this bounds work by local occupancy, not map size * all vehicles.
+	var radius := footprint_radius - POSITION_EPSILON
+	var reach := footprint_radius + _config.navigation_cell_size * sqrt(2.0)
+	var minimum := (center - Vector2.ONE * reach - _grid.offset) / _grid.cell_size
+	var maximum := (center + Vector2.ONE * reach - _grid.offset) / _grid.cell_size
+	for x: int in range(maxi(0, floori(minimum.x)), mini(_grid.region.size.x - 1, ceili(maximum.x)) + 1):
+		for z: int in range(maxi(0, floori(minimum.y)), mini(_grid.region.size.y - 1, ceili(maximum.y)) + 1):
+			var id := _cell_index(Vector2i(x,z))
+			if not _routes.has_point(id): continue
+			_count("graph_points_examined")
+			_count("occupancy_pair_tests")
+			var point := _routes.get_point_position(id)
+			if point.distance_to(center) < radius: points[id] = true
+			for next: int in _static_connections[id]:
+				if next <= id: continue
+				_count("graph_edges_examined")
+				_count("occupancy_pair_tests")
+				var other := _routes.get_point_position(next)
+				if Geometry2D.get_closest_point_to_segment(center,point,other).distance_to(center) < radius:
+					edges[Vector2i(id,next)] = true
+	return {"points":points,"edges":edges}
+
+
+func _dynamic_clear(position: Vector3) -> bool:
+	return dynamic_segment_clear(position,position)
+
+
+func _index_dynamic_circles() -> void:
+	_dynamic_cells.clear()
+	# Derived from existing geometry, not a new gameplay/balance parameter.
+	_dynamic_cell_size = _config.navigation_cell_size
+	for radius: float in _dynamic_radii: _dynamic_cell_size = maxf(_dynamic_cell_size,radius*2.0)
+	for index: int in _dynamic_centers.size():
+		var center := Vector2(_dynamic_centers[index].x,_dynamic_centers[index].z)
+		var extent := Vector2.ONE * _dynamic_radii[index]
+		var minimum := (center-extent)/_dynamic_cell_size
+		var maximum := (center+extent)/_dynamic_cell_size
+		for x: int in range(floori(minimum.x),floori(maximum.x)+1):
+			for z: int in range(floori(minimum.y),floori(maximum.y)+1):
+				var cell := Vector2i(x,z)
+				if not _dynamic_cells.has(cell): _dynamic_cells[cell] = []
+				_dynamic_cells[cell].append(index)
+
+
+func dynamic_segment_clear(start: Vector3, end: Vector3) -> bool:
+	_count("occupancy_queries")
+	if _dynamic_centers.is_empty(): return true
+	var a := Vector2(start.x,start.z)
+	var b := Vector2(end.x,end.z)
+	var minimum := a.min(b)/_dynamic_cell_size
+	var maximum := a.max(b)/_dynamic_cell_size
+	var tested := {}
+	for x: int in range(floori(minimum.x),floori(maximum.x)+1):
+		for z: int in range(floori(minimum.y),floori(maximum.y)+1):
+			_count("occupancy_bucket_queries")
+			var cell := Vector2i(x,z)
+			if not _dynamic_cells.has(cell): continue
+			for index: int in _dynamic_cells[cell]:
+				if tested.has(index): continue
+				tested[index] = true
+				_count("occupancy_pair_tests")
+				var center := Vector2(_dynamic_centers[index].x,_dynamic_centers[index].z)
+				var nearest := Geometry2D.get_closest_point_to_segment(center,a,b)
+				if nearest.distance_to(center) < _dynamic_radii[index] - POSITION_EPSILON: return false
+	return true
 
 
 func initialize(config: MovementConfig, definition: PrototypeMapDefinition) -> bool:
 	_initialized = false
+	_dynamic_centers.clear()
+	_dynamic_radii.clear()
+	_disabled_edges.clear()
+	_disabled_points.clear()
+	_static_connections.clear()
+	_circle_overlays.clear()
+	_dynamic_cells.clear()
 	_config = config
 	surface = TerrainSurface.new(definition)
 	_routes.surface = surface
@@ -26,7 +161,7 @@ func initialize(config: MovementConfig, definition: PrototypeMapDefinition) -> b
 	_clearance = config.unit_width * 0.5 + config.obstacle_margin
 	_blocked.clear()
 	for obstacle: Rect2 in definition.obstacles:
-		_blocked.append(obstacle.abs().grow(_clearance))
+		_blocked.append(obstacle.abs())
 	var cell := config.navigation_cell_size
 	var extent := config.maximum_xz - config.minimum_xz
 	_grid.region = Rect2i(Vector2i.ZERO, Vector2i(ceili(extent.x / cell), ceili(extent.y / cell)))
@@ -40,6 +175,8 @@ func initialize(config: MovementConfig, definition: PrototypeMapDefinition) -> b
 			var point := _grid.get_point_position(id)
 			_grid.set_point_solid(id, not is_position_walkable(Vector3(point.x, 0.0, point.y)))
 	_build_route_connections()
+	for id: int in _routes.get_point_ids():
+		_static_connections[id] = _routes.get_point_connections(id)
 	_initialized = true
 	return true
 
@@ -78,26 +215,33 @@ func is_ready() -> bool:
 
 
 func is_position_walkable(position: Vector3) -> bool:
+	_count("passability_queries")
 	if _config == null or not position.is_finite():
 		return false
 	var point := Vector2(position.x, position.z)
+	if not _dynamic_clear(position): return false
 	# Vector3 stores float32 values; tolerate rounding at an inset map boundary.
 	if point.x < _config.minimum_xz.x + _clearance - POSITION_EPSILON or point.x > _config.maximum_xz.x - _clearance + POSITION_EPSILON \
 		or point.y < _config.minimum_xz.y + _clearance - POSITION_EPSILON or point.y > _config.maximum_xz.y - _clearance + POSITION_EPSILON:
 		return false
 	for obstacle: Rect2 in _blocked:
-		if point.x >= obstacle.position.x and point.x <= obstacle.end.x \
-			and point.y >= obstacle.position.y and point.y <= obstacle.end.y:
+		var nearest := Vector2(clampf(point.x,obstacle.position.x,obstacle.end.x),clampf(point.y,obstacle.position.y,obstacle.end.y))
+		if point.distance_to(nearest) <= _clearance:
 			return false
 	return true
 
 
 func segment_is_walkable(start: Vector3, end: Vector3) -> bool:
+	if not dynamic_segment_clear(start,end): return false
 	if not is_position_walkable(start) or not is_position_walkable(end):
 		return false
 	for obstacle: Rect2 in _blocked:
 		if _segment_hits_rectangle(Vector2(start.x, start.z), Vector2(end.x, end.z), obstacle):
 			return false
+		var a := Vector2(start.x,start.z)
+		var b := Vector2(end.x,end.z)
+		for corner: Vector2 in [obstacle.position, obstacle.end, Vector2(obstacle.position.x,obstacle.end.y), Vector2(obstacle.end.x,obstacle.position.y)]:
+			if corner.distance_to(Geometry2D.get_closest_point_to_segment(corner,a,b)) <= _clearance: return false
 	return true
 
 
@@ -169,6 +313,8 @@ func _slot_available(position: Vector3, reserved: Array[Vector3], separation: fl
 
 
 func find_path(start: Vector3, destination: Vector3, reserved: Array[Vector3] = [], separation: float = 0.0, fast: bool = false, unit: UnitState = null) -> PackedVector3Array:
+	_count("path_queries")
+	_count("destination_validations")
 	if not _initialized or not is_position_walkable(start):
 		return PackedVector3Array()
 	if is_position_walkable(destination) and _slot_available(destination, reserved, separation):

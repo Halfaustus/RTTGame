@@ -83,7 +83,7 @@ func _combat_after_stop() -> void:
 	_check(movement.request_move(1, 42, Vector3(10, 0, 110)).is_empty(), "stationary weapon moving")
 	_check(combat.advance(0.1, movement)["shots"].is_empty(), "stationary weapon cannot fire while moving")
 	movement.request_stop([1], 42)
-	_check(combat.advance(0.1, movement)["shots"].size() == 1 and enemy.health == 90.0, "stop preserves automatic combat and enables stationary firing")
+	_check(combat.advance(0.1, movement)["shots"].size() == 1 and enemy.health == 35.0, "stop preserves automatic combat and enables stationary firing")
 
 
 func _presentation_checks() -> void:

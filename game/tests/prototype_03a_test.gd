@@ -98,6 +98,7 @@ func _server_checks() -> void:
 
 func _combat_tick_checks() -> void:
 	var model = load("res://scripts/networking/network_manager.gd").new()
+	model.legacy_combat_fixture_enabled = true
 	root.add_child(model)
 	var map := PrototypeMapDefinition.new()
 	check(model._movement.initialize_navigation(map), "isolated combat navigation")
@@ -109,7 +110,7 @@ func _combat_tick_checks() -> void:
 	attacker.configure(1, preload("res://data/unit_mobile.tres"))
 	var enemy := UnitState.new(2, 0, Vector3(11, 0.5, 100))
 	enemy.configure(2, preload("res://data/unit_unarmed.tres"))
-	enemy.health = 10
+	enemy.health = 5
 	for unit: UnitState in [attacker, enemy]:
 		model._authoritative_units[unit.unit_id] = unit
 		model._movement.add_unit(unit)

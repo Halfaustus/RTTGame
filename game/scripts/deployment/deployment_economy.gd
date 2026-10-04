@@ -279,6 +279,11 @@ func card_counts(player_id: int, config_id: String) -> Dictionary:
 			result.pending += 1
 	return result
 
+func cancel_player_orders(player_id: int) -> void:
+	for order: Dictionary in _orders.values():
+		if order.player_id == player_id and order.status in ["pending","held","placed","countdown","waiting"]:
+			cancel_order(player_id,int(order.order_id))
+
 
 func static_spawn_available(config_id: String, point_id: String) -> bool:
 	if not _catalog.has(config_id) or not _points.has(point_id) or _points[point_id].entry_kind != "ground":
@@ -328,7 +333,8 @@ func export_player(player_id: int) -> Dictionary:
 		cards[config_id] = card_counts(player_id, config_id)
 		var entry: Dictionary = _catalog[config_id]
 		catalog.append({"config_id":config_id,"category":entry.category,"value_points":entry.value_points,
-			"sortie_points":entry.sortie_points,"maximum_present":entry.maximum_present})
+			"sortie_points":entry.sortie_points,"maximum_present":entry.maximum_present,
+			"unit_type":entry.definition.unit_type,"armed":entry.definition.is_armed()})
 	var points: Array[Dictionary] = []
 	for point: Dictionary in _points.values():
 		if point.entry_kind == "ground" and point.allowed_factions.has(account.faction_id):
@@ -374,7 +380,7 @@ func execute_deployments(units: Dictionary, spawn: Callable) -> void:
 	for order: Dictionary in due:
 		var entry: Dictionary = _catalog[order.config_id]
 		var point: Dictionary = _points[order.point_id]
-		var position: Variant = find_spawn_position(entry.width, point.position, units)
+		var position: Variant = find_spawn_position(maxf(entry.width,entry.definition.movement_radius * 2.0), point.position, units)
 		if position == null:
 			order.next_retry_tick = _tick + _retry_ticks
 			if order.status != "waiting":
@@ -416,10 +422,10 @@ func find_spawn_position(width: float, center: Vector3, units: Dictionary) -> Va
 		var occupied := false
 		for unit: UnitState in units.values():
 			if unit.health <= 0: continue
-			var other_width := _movement.unit_width
+			var other_width := maxf(_movement.unit_width,unit.movement_radius() * 2.0)
 			for entry: Dictionary in _catalog.values():
 				if unit.definition == entry.definition:
-					other_width = entry.width
+					other_width = maxf(other_width,entry.width)
 					break
 			var separation: float = (width + other_width) * 0.5 + _movement.obstacle_margin
 			if absf(position.x - unit.position.x) < separation and absf(position.z - unit.position.z) < separation:

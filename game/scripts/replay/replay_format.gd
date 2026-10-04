@@ -3,7 +3,7 @@ extends RefCounted
 
 const VERSION := 1
 const MAX_INTEGER := 9007199254740991
-const GAME_VERSION := "0.3C"
+const GAME_VERSION := "0.5B"
 
 
 static func header(match_id: String, tick_hz: int, map_id: String, rules_id: String, seed: String, players: Array = [], fingerprints: Dictionary = {}) -> Dictionary:

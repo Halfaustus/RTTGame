@@ -29,6 +29,7 @@ var _formation_preview: Node3D
 var _left_pressed: bool = false
 var _box_dragging: bool = false
 var _drag_start: Vector2
+var _drag_shift := false
 var _selection_rectangle: Control
 var _dead_units: Dictionary[int, bool] = {}
 var _fast_move_armed: bool = false
@@ -36,6 +37,10 @@ var _attack_move_armed: bool = false
 var _reverse_move_armed: bool = false
 var _movement_mode_hint: Label
 var _deployment_ui: DeploymentUI
+var _unit_markers: Dictionary[int, UnitMarker] = {}
+var _marker_layer: Control
+var _selection_collection: Dictionary[int, Node3D] = {}
+var _cycling_selection := false
 
 @onready var _units: Node3D = $Units
 @onready var _camera: Camera3D = $Units/Camera3D
@@ -56,9 +61,13 @@ func _ready() -> void:
 	presentation_source.unit_stops_received.connect(_on_unit_stops_received)
 	presentation_source.unit_armament_received.connect(func(id: int, armed: bool):
 		if _visual_units.has(id):
-			_visual_units[id].armed = armed)
+			_visual_units[id].armed = armed
+			_unit_markers[id].armed = armed
+			_unit_markers[id].refresh())
 	presentation_source.unit_type_received.connect(_on_unit_type_received)
 	presentation_source.unit_orientations_received.connect(_on_unit_orientations_received)
+	presentation_source.unit_identity_received.connect(_on_unit_identity_received)
+	presentation_source.unit_member_count_received.connect(_on_unit_member_count_received)
 	if not replay_mode:
 		multiplayer.server_disconnected.connect(_clear_selection)
 		multiplayer.server_disconnected.connect(_clear_movement_paths)
@@ -66,6 +75,10 @@ func _ready() -> void:
 		multiplayer.connected_to_server.connect(_reset_replicated_units)
 	var overlay := CanvasLayer.new()
 	add_child(overlay)
+	_marker_layer = Control.new()
+	_marker_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_marker_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(_marker_layer)
 	_selection_rectangle = SELECTION_RECTANGLE.new()
 	overlay.add_child(_selection_rectangle)
 	_movement_mode_hint = Label.new()
@@ -78,6 +91,8 @@ func _ready() -> void:
 		_deployment_ui = DeploymentUI.new()
 		_deployment_ui.setup(_camera, _ground_at)
 		_deployment_ui.input_ownership_changed.connect(func(active: bool):
+			for marker: UnitMarker in _unit_markers.values():
+				marker.mouse_filter = Control.MOUSE_FILTER_IGNORE if active else Control.MOUSE_FILTER_PASS
 			if active:
 				_cancel_drag()
 				_cancel_right_drag()
@@ -119,7 +134,10 @@ func _handle_world_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey:
-		if _is_reverse_move_key(event):
+		if event.keycode == KEY_TAB and event.pressed and not event.echo and get_viewport().gui_get_focus_owner() == null:
+			_cycle_marker_selection(event.shift_pressed)
+			get_viewport().set_input_as_handled()
+		elif _is_reverse_move_key(event):
 			_arm_reverse_move()
 			get_viewport().set_input_as_handled()
 		elif _is_attack_move_key(event):
@@ -156,12 +174,13 @@ func _handle_world_input(event: InputEvent) -> void:
 				_left_pressed = true
 				_box_dragging = false
 				_drag_start = event.position
+				_drag_shift = event.shift_pressed
 			elif _left_pressed:
 				_update_drag(event.position)
 				if _box_dragging:
-					_queue_action({"type": "box", "rectangle": Rect2(_drag_start, event.position - _drag_start).abs()})
+					_queue_action({"type": "box", "rectangle": Rect2(_drag_start, event.position - _drag_start).abs(),"shift":_drag_shift})
 				else:
-					_queue_action({"type": "click", "position": event.position})
+					_queue_action({"type": "click", "position": event.position,"shift":_drag_shift})
 				_cancel_drag()
 			get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_RIGHT and not _left_pressed:
@@ -302,9 +321,9 @@ func _physics_process(_delta: float) -> void:
 	for action: Dictionary in _pending_actions:
 		match action["type"]:
 			"click":
-				_select_unit(_pick_unit(action["position"]))
+				_select_unit(_pick_unit(action["position"]),action.get("shift",false))
 			"box":
-				_select_box(action["rectangle"])
+				_select_box(action["rectangle"],action.get("shift",false))
 			"move":
 				_request_move_at(action["position"], action.get("mode", MovementSimulation.MoveMode.BASIC), action.get("end", action["position"]), action.get("dragged", false), action.get("ground"), action.get("tip"))
 			"stop":
@@ -329,18 +348,21 @@ func _pick_unit(screen_position: Vector2) -> Node3D:
 	return unit
 
 
-func _select_unit(unit: Node3D) -> void:
+func _select_unit(unit: Node3D, shift: bool = false) -> void:
 	# Ownership is read from the server-provided visual metadata, never changed.
 	if unit != null and unit.owner_peer_id != _view_owner_id():
 		return
 	var selection: Dictionary[int, Node3D] = {}
+	if shift: selection = _selection_collection.duplicate()
 	if unit != null:
-		selection[unit.unit_id] = unit
+		if shift and selection.has(unit.unit_id): selection.erase(unit.unit_id)
+		else: selection[unit.unit_id] = unit
 	_replace_selection(selection)
 
 
-func _select_box(rectangle: Rect2) -> void:
+func _select_box(rectangle: Rect2, shift: bool = false) -> void:
 	var selection: Dictionary[int, Node3D] = {}
+	if shift: selection = _selection_collection.duplicate()
 	var camera := get_viewport().get_camera_3d()
 	if camera != null:
 		for unit_id: int in _visual_units:
@@ -361,8 +383,12 @@ func _replace_selection(selection: Dictionary[int, Node3D]) -> void:
 		if is_instance_valid(unit):
 			unit.set_selected(false)
 	_selected_units = selection
+	if not _cycling_selection: _selection_collection = selection.duplicate()
 	for unit: Node3D in _selected_units.values():
 		unit.set_selected(true)
+	for id: int in _unit_markers:
+		_unit_markers[id].selected = _selected_units.has(id)
+		_unit_markers[id].refresh()
 
 
 func _prune_selection() -> void:
@@ -392,6 +418,11 @@ func _reset_replicated_units() -> void:
 		unit.queue_free()
 	_visual_units.clear()
 	_dead_units.clear()
+	for marker: UnitMarker in _unit_markers.values():
+		marker.hide()
+		marker.queue_free()
+	_unit_markers.clear()
+	_selection_collection.clear()
 
 
 func _on_unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3) -> void:
@@ -404,6 +435,11 @@ func _on_unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3
 	unit.position = position
 	_units.add_child(unit)
 	_visual_units[unit_id] = unit
+	var marker := UnitMarker.new()
+	marker.chosen.connect(_choose_marker.bind(unit_id))
+	_marker_layer.add_child(marker)
+	if _deployment_ui != null and _deployment_ui.owns_commands(): marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_unit_markers[unit_id] = marker
 	unit.tree_exiting.connect(_on_visual_unit_removed.bind(unit_id))
 
 
@@ -415,6 +451,71 @@ func _on_unit_combat_state_received(unit_id: int, team_id: int, maximum_health: 
 func _on_unit_type_received(unit_id: int, unit_type: int) -> void:
 	if _visual_units.has(unit_id):
 		_visual_units[unit_id].display_unit_type(unit_type)
+		_unit_markers[unit_id].unit_kind = unit_type
+		_unit_markers[unit_id].refresh()
+
+func _on_unit_identity_received(id: int, player: int, definition: String) -> void:
+	if not _visual_units.has(id): return
+	_visual_units[id].owner_player_id = player
+	_visual_units[id].definition_id = definition
+	_unit_markers[id].player_id = player
+	_unit_markers[id].refresh()
+
+func _on_unit_member_count_received(id: int,count: int) -> void:
+	if _unit_markers.has(id):
+		_unit_markers[id].member_count = count
+		_unit_markers[id].refresh()
+
+func _process(_delta: float) -> void:
+	for id: int in _unit_markers:
+		var unit := _visual_units[id]
+		_unit_markers[id].project(_camera,unit.global_position)
+		_unit_markers[id].visible = _unit_markers[id].visible and unit.is_visible_in_tree()
+
+func _choose_marker(shift: bool,double_click: bool,id: int) -> void:
+	if replay_mode or _camera.is_rotating() or (_deployment_ui != null and _deployment_ui.owns_commands()): return
+	if _fast_move_armed or _attack_move_armed or _reverse_move_armed:
+		_cancel_fast_move()
+		_cancel_attack_move()
+		_cancel_reverse_move()
+		return
+	var unit: Node3D = _visual_units.get(id)
+	if unit == null or unit.owner_peer_id != _view_owner_id(): return
+	if double_click:
+		var selection: Dictionary[int,Node3D] = {}
+		for candidate: Node3D in _visual_units.values():
+			if candidate.owner_peer_id != _view_owner_id() or candidate.health <= 0 or candidate.definition_id != unit.definition_id or candidate.unit_type != unit.unit_type or candidate.armed != unit.armed: continue
+			if not _camera.is_position_behind(candidate.global_position) and get_viewport().get_visible_rect().has_point(_camera.unproject_position(candidate.global_position)): selection[candidate.unit_id] = candidate
+		_replace_selection(selection)
+	elif shift:
+		var selection := _selection_collection.duplicate()
+		if selection.has(id): selection.erase(id)
+		else: selection[id] = unit
+		_replace_selection(selection)
+	else:
+		if not _selection_collection.has(id): _selection_collection = {id:unit}
+		_cycling_selection = true
+		var selection: Dictionary[int,Node3D] = {id:unit}
+		_replace_selection(selection)
+		_cycling_selection = false
+
+func _cycle_marker_selection(restore: bool) -> void:
+	var ids := _selection_collection.keys()
+	ids.sort_custom(func(a: int,b: int):
+		var ua := _selection_collection[a]
+		var ub := _selection_collection[b]
+		if ua.unit_type != ub.unit_type: return ua.unit_type < ub.unit_type
+		if ua.definition_id != ub.definition_id: return ua.definition_id < ub.definition_id
+		return a < b)
+	if ids.is_empty(): return
+	_cycling_selection = true
+	if restore: _replace_selection(_selection_collection.duplicate())
+	else:
+		var current: int = _selected_units.keys()[0] if _selected_units.size() == 1 else -1
+		var next: int = ids[(ids.find(current)+1)%ids.size()]
+		var selection: Dictionary[int,Node3D] = {next:_selection_collection[next]}
+		_replace_selection(selection)
+	_cycling_selection = false
 
 
 func _on_combat_shot_received(start: Vector3, end: Vector3) -> void:
@@ -433,11 +534,18 @@ func _on_unit_death_received(unit_id: int) -> void:
 
 
 func _on_visual_unit_removed(unit_id: int) -> void:
+	var focused := _selected_units.size() == 1 and _selected_units.has(unit_id)
 	_clear_unit_path(unit_id)
 	if _selected_units.has(unit_id) and is_instance_valid(_selected_units[unit_id]):
 		_selected_units[unit_id].set_selected(false)
 	_selected_units.erase(unit_id)
 	_visual_units.erase(unit_id)
+	_selection_collection.erase(unit_id)
+	if _unit_markers.has(unit_id):
+		_unit_markers[unit_id].hide()
+		_unit_markers[unit_id].queue_free()
+		_unit_markers.erase(unit_id)
+	if focused and not _selection_collection.is_empty(): _cycle_marker_selection(false)
 
 
 func _ground_at(screen_position: Vector2) -> Variant:

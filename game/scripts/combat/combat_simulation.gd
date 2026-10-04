@@ -77,7 +77,7 @@ func advance(delta: float, movement: MovementSimulation) -> Dictionary:
 		var attacker := _units[id]
 		_cooldowns[id] = maxf(0.0, _cooldowns.get(id, 0.0) - delta)
 		var weapon := attacker.weapon
-		if attacker.health <= 0.0 or weapon == null or _cooldowns[id] > 0.0:
+		if not attacker.runtime_weapons.is_empty() or attacker.health <= 0.0 or weapon == null or _cooldowns[id] > 0.0:
 			continue
 		if movement.is_moving(id) and not weapon.can_fire_while_moving:
 			continue
@@ -85,7 +85,7 @@ func advance(delta: float, movement: MovementSimulation) -> Dictionary:
 		if target == null:
 			continue
 		_cooldowns[id] = weapon.firing_interval
-		target.health = maxf(0.0, target.health - weapon.damage)
+		target.apply_prototype_damage(weapon.damage)
 		shots.append({"attacker_id": id, "target_id": target.unit_id,
 			"start": attacker.position, "end": target.position, "health": target.health})
 		if target.health <= 0.0:

@@ -1,5 +1,22 @@
 # RTTGame Development Instructions
 
+## Document responsibilities and priority
+
+- Development constraints regulate workflow, authorization, verification, version control, change management and delivery. They must not contain unit configurations, balance values, game mechanics, UI layouts or stage feature design.
+- docs/DESIGN_BASELINE.md is the sole authority for game design. Read the actual working-tree file and its identifier; do not reconstruct missing design from chat summaries, historical implementation or old stage documents.
+- docs/HANDOFF.md records actual implementation, verification, limitations and handoff. It is not a source of new design authorization. Historical records retain their original context and do not override the latest baseline.
+- Within project documents, applicable development constraints take precedence over the design baseline. If they conflict, obey the constraints and report the conflict and impact. This does not permit inserting game design into constraints to override the baseline. Explicit user instructions govern the authorized task.
+- Record the provenance, scope, limits and stage of autonomous choices. Distinguish formal values, explicitly authorized test configuration, temporary parameters and implementation details. Missing original authorization must be marked as not found; code existence, test success and handoff prose are not approval.
+- The baseline's test-instance authorization does not authorize development during a pause, changing its framework or known formal values, or retroactively approving earlier decisions. Do not promote temporary values to formal design without explicit authorization.
+- Do not discard unique project content removed during cleanup or silently migrate it into the baseline. Record its source and disposition for user review. Audit details: docs/DEVELOPMENT_CONSTRAINT_REVIEW.md and docs/AUTONOMOUS_DESIGN_REVIEW.md.
+
+## Handoff maintenance
+
+- Keep docs/HANDOFF.md as the current handoff summary: actual baseline and stage, completion and key verification conclusions, active limitations and blockers, next step and authorization boundary, and links to detailed records.
+- Update the relevant current summary each round instead of appending long historical discussions, tables or logs. Judge size by whether a new agent can quickly identify the current state and authorized next step; do not impose a mechanical word limit.
+- Reuse existing topic records for constraint reviews, conformity checks, authorization inventories and stage evidence. Before removing unique uncommitted detail from HANDOFF, migrate it into the appropriate record and verify preservation. Committed history may be traced through Git; do not assume uncommitted information is recoverable that way.
+- Remove resolved issues from the current summary while preserving worthwhile historical evidence separately. Documentation checks do not constitute gameplay or manual acceptance.
+
 ## Project
 
 RTTGame is a real-time tactics game built with Godot 4.7.2.
@@ -134,42 +151,14 @@ Avoid unnecessary per-frame work.
 
 Systems expected to scale with unit count should be designed with profiling and batching in mind.
 
-## Current development phase
+## Scope and authorization
 
-The current target is Prototype 0.4D: authoritative upkeep, economic lifecycle and
-0.4 closure on the existing 0.4A/B/C deployment interfaces. Prototype 0.2 has
-been manually accepted and saved.
-Prototype 0.3A establishes state/event replay data; 0.3B adds full server recording.
-Prototype 0.3C adds minimal offline 1x playback; its manual acceptance remains pending.
-Further replay work (including seeking), reconnection and match-history features are deferred.
-Preserve the existing results and interfaces; resume only after the user sets a new scope.
-Recording success or automatic playback checks are not manual playback acceptance.
-Preserve the existing test spawning entry. 0.4C executes ground countdown/search/waiting
-and spawning; 0.4D adds authoritative upkeep and closes the economy loop. Blocked orders retain cost and reservation.
-Use match player_id for accounts; peer IDs only authenticate connections. Economy and
-orders replicate only to their owner. Do not append these domains to RTTReplay v1.
-Deployment and value scores are independent non-negative integers divisible by five;
-reject invalid values without rounding. Maintenance and account accumulation may be fractional.
-While holding a deployment card, left click places it and right click/E cancels it;
-ordinary selection/movement must not receive those inputs. Esc retains its existing behavior.
-Only one card may be held; multiple placed orders are permitted. Ground countdown is
-three seconds on server ticks; air six-second configuration is reserved only. Pickup
-pauses eligibility and replacement restarts the full countdown. Deployment adjudication
-and spawning run in session before movement commands to preserve frozen v1 spawn phases.
-Do not add air units, transport, return-to-base refunds, replay extensions or reconnection in 0.4D.
-
-Prototype 0.1 must demonstrate:
-
-1. Headless dedicated server startup.
-2. Two local clients connecting to the server.
-3. Server-authoritative unit ownership.
-4. Client unit selection.
-5. Client movement command.
-6. Server command validation.
-7. Server-authoritative movement.
-8. Replication of the resulting unit state to both clients.
-
-Do not implement advanced combat systems until this networking and movement loop works reliably.
+- Take the current implementation stage and verification status from docs/HANDOFF.md and actual evidence; do not store stage progress or gameplay rules in this file.
+- Start or resume implementation only within the user's current authorized scope. A later pause overrides earlier development authorization; do not choose the next stage automatically.
+- Preserve existing results, interfaces and uncommitted work. Report incompatible design changes before changing code, configuration or tests; a documentation audit does not authorize implementation repair.
+- Preserve authenticated ownership and private-state boundaries. Do not use connection identities as substitutes for domain identities or expose private state through unrelated replication or replay channels.
+- When changing execution order or compatibility-sensitive interfaces, establish the existing contract and verify the affected frozen replay boundaries. Do not silently change those contracts.
+- Historical acceptance criteria and unique project decisions removed from constraints remain review items in docs/DEVELOPMENT_CONSTRAINT_REVIEW.md; removal does not authorize deleting their implementation or treating them as newly approved design.
 
 ## Replay compatibility
 
@@ -202,6 +191,15 @@ separately. Successful serialization tests are not full replay recording or play
 
 ## Design baseline
 
+- Validate capabilities, command eligibility and configuration against the actual baseline and explicit authorization. Report missing implementations; do not silently grant unsupported capabilities.
+
+- From 0.5B, fill missing non-principled implementation parameters with the
+  smallest functional configuration. Never override formal values, invent
+  mechanisms, change authority/economy/unit semantics or expand stage scope.
+  Centralize parameters and report each name/value/purpose/rationale and whether
+  adjustment is suggested at minor-version closure. Unopposed values may carry
+  forward without asking again, but are not permanent design; later baseline
+  values take precedence. Missing design decisions/conflicts must be reported. Explicit authorization for test instances may permit choices beyond numerical parameter completion, but only inside its stated framework, stage and limits; never infer that authorization from existing code or passing tests.
 - docs/DESIGN_BASELINE.md is the only design authority. Read the actual local development file; never assemble design from other conversations.
 - Before each major version, review that baseline and establish the stage scope. Minor versions inherit it. Read relevant changes whenever the user explicitly updates the baseline.
 - Report missing or conflicting design; do not invent additions. HANDOFF.md records actual implementation and validation status.

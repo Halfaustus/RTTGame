@@ -18,8 +18,9 @@ var _move_mode: OptionButton
 var _rows: VBoxContainer
 var _balance: Label
 var _message: Label
-var _ghost: Label
-var _markers: Dictionary[int, Button] = {}
+var _ghost: UnitMarker
+var _markers: Dictionary[int, UnitMarker] = {}
+var _purchase_buttons: Dictionary[String, Button] = {}
 var _transport_enabled := true
 
 func setup(camera: Camera3D, ground: Callable) -> void:
@@ -63,10 +64,12 @@ func _ready() -> void:
 	_message.custom_minimum_size = Vector2(330, 0)
 	_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_message)
-	_ghost = Label.new()
+	_ghost = UnitMarker.new()
+	_ghost.is_order = true
 	_ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ghost.z_index = 20
 	add_child(_ghost)
+	_ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_network.deployment_state_received.connect(apply_state)
 	_network.deployment_result_received.connect(apply_result)
 	multiplayer.server_disconnected.connect(reset_connection)
@@ -80,11 +83,15 @@ func apply_state(snapshot: Dictionary) -> void:
 	state = snapshot.duplicate(true)
 	held_id = int(state.get("held_order_id", 0))
 	var selected_point := _point.get_item_text(_point.selected) if _point.selected >= 0 else ""
-	_point.clear()
-	for point: Dictionary in state.get("points", []):
-		_point.add_item(point.point_id)
-		if point.point_id == selected_point:
-			_point.select(_point.item_count - 1)
+	var point_ids: Array[String] = []
+	for point: Dictionary in state.get("points", []): point_ids.append(point.point_id)
+	var current_ids: Array[String] = []
+	for index: int in _point.item_count: current_ids.append(_point.get_item_text(index))
+	if current_ids != point_ids:
+		_point.clear()
+		for point_id: String in point_ids:
+			_point.add_item(point_id)
+			if point_id == selected_point: _point.select(_point.item_count-1)
 	_balance.text = "余额：%d 出动分\n每 5 秒：收入 %d / 维护 %d / 净收入 %d" % [state.display_points, int(state.get("income_per_settlement", 0)), int(state.get("upkeep_per_settlement", 0)), int(state.get("net_income_per_settlement", 0))] if not state.is_empty() else "等待服务器账户…"
 	_refresh_rows()
 	_refresh_markers()
@@ -109,21 +116,31 @@ func reset_connection() -> void:
 	_message.text = "连接已结束，购买不可用"
 
 func _refresh_rows() -> void:
-	for child: Node in _rows.get_children():
-		_rows.remove_child(child)
-		child.queue_free()
+	# Keep button identities through frequent countdown snapshots. Replacing a
+	# pressed button before release loses its pressed signal and blocks buying.
+	var live := {}
 	var category := "infantry" if _category.selected == 0 else "armored_vehicle"
 	for entry: Dictionary in state.get("catalog", []):
 		if entry.category != category:
 			continue
 		var counts: Dictionary = state.cards[entry.config_id]
 		var remaining: int = maxi(0, int(entry.maximum_present) - int(counts.present) - int(counts.pending))
-		var button := Button.new()
-		button.focus_mode = Control.FOCUS_NONE
+		live[entry.config_id] = true
+		if not _purchase_buttons.has(entry.config_id):
+			var created := Button.new()
+			created.focus_mode = Control.FOCUS_NONE
+			created.pressed.connect(buy.bind(str(entry.config_id)))
+			_rows.add_child(created)
+			_purchase_buttons[entry.config_id] = created
+		var button: Button = _purchase_buttons[entry.config_id]
 		button.text = "%s\n部署 %d · 价值 %d · 剩余 %d" % [_name_for(entry.config_id),entry.sortie_points,entry.value_points,remaining]
 		button.disabled = owns_commands() or remaining == 0 or state.balance < entry.sortie_points or not _point_allowed(category)
-		button.pressed.connect(func(): buy(entry.config_id))
-		_rows.add_child(button)
+	for id: String in _purchase_buttons.keys():
+		if not live.has(id):
+			var obsolete := _purchase_buttons[id]
+			_rows.remove_child(obsolete)
+			obsolete.queue_free()
+			_purchase_buttons.erase(id)
 	_point.disabled = owns_commands()
 
 func _point_allowed(category: String) -> bool:
@@ -148,6 +165,9 @@ func place(destination: Vector3) -> void:
 func cancel() -> void:
 	if held_id != 0 and not busy:
 		_send("cancel", {"order_id":held_id,"destination":Vector3.ZERO})
+
+func cancel_placed(order_id: int) -> void:
+	if not owns_commands(): _send("cancel",{"order_id":order_id,"destination":Vector3.ZERO})
 
 func _send(action: String, payload: Dictionary) -> void:
 	if _camera != null and _camera.is_rotating():
@@ -211,12 +231,14 @@ func _refresh_markers() -> void:
 			continue
 		live[order.order_id] = true
 		if not _markers.has(order.order_id):
-			var button := Button.new()
-			button.focus_mode = Control.FOCUS_NONE
-			button.pressed.connect(func(): pickup(order.order_id))
+			var button := UnitMarker.new()
+			button.is_order = true
+			button.chosen.connect(func(_shift: bool,_double: bool): pickup(order.order_id))
+			button.cancel_requested.connect(cancel_placed.bind(int(order.order_id)))
 			add_child(button)
 			_markers[order.order_id] = button
-		_markers[order.order_id].text = "%s #%d\n%s" % [_name_for(order.config_id),order.order_id,status_text(order)]
+		_configure_marker(_markers[order.order_id],order)
+		_markers[order.order_id].mouse_filter = Control.MOUSE_FILTER_IGNORE if owns_commands() else Control.MOUSE_FILTER_STOP
 	for id: int in _markers.keys():
 		if not live.has(id):
 			_markers[id].queue_free()
@@ -225,15 +247,32 @@ func _refresh_markers() -> void:
 
 func _process(_delta: float) -> void:
 	_ghost.visible = held_id != 0
-	_ghost.position = get_viewport().get_mouse_position() + Vector2(16, 20)
-	_ghost.text = "兵牌 #%d：待放置%s" % [held_id,"（等待确认）" if busy else ""]
+	_ghost.position = get_viewport().get_mouse_position()-_ghost.style.body_size*0.5
+	if held_id != 0 and _ground.is_valid():
+		var destination: Variant = _ground.call(get_viewport().get_mouse_position())
+		var movement: MovementConfig = preload("res://data/prototype_movement.tres")
+		_ghost.invalid_destination = not destination is Vector3
+		if destination is Vector3:
+			_ghost.invalid_destination = not destination.is_finite() or destination.x < movement.minimum_xz.x or destination.x > movement.maximum_xz.x or destination.z < movement.minimum_xz.y or destination.z > movement.maximum_xz.y
+	for order: Dictionary in state.get("orders", []):
+		if order.order_id == held_id: _configure_marker(_ghost,order)
 	for order: Dictionary in state.get("orders", []):
 		if not _markers.has(order.order_id) or _camera == null:
 			continue
-		var button: Button = _markers[order.order_id]
+		var button: UnitMarker = _markers[order.order_id]
 		button.disabled = owns_commands() or order.status not in ["placed", "countdown", "waiting"]
-		button.visible = not _camera.is_position_behind(order.destination)
-		button.position = _camera.unproject_position(order.destination) - button.size * 0.5
+		button.mouse_filter = Control.MOUSE_FILTER_IGNORE if owns_commands() else Control.MOUSE_FILTER_STOP
+		button.project(_camera,order.destination)
+
+func _configure_marker(marker: UnitMarker, order: Dictionary) -> void:
+	marker.player_id = int(state.get("player_id",0))
+	for entry: Dictionary in state.get("catalog",[]):
+		if entry.config_id == order.config_id:
+			marker.unit_kind = int(entry.unit_type)
+			marker.armed = bool(entry.armed)
+	marker.set_meta("order_status",order.status)
+	marker.set_meta("remaining_seconds",order.get("remaining_seconds",0.0))
+	marker.refresh()
 
 static func status_text(order: Dictionary) -> String:
 	match order.status:
