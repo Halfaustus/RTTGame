@@ -25,6 +25,8 @@ var _owns_output := false
 func start(network: Node, path: String, interval: int = 300) -> bool:
 	if status != "disabled":
 		return false
+	if network._movement._config == preload("res://data/db33_active_test_movement.tres"):
+		return _fail("active TEST ONLY battlefield recording unsupported by frozen Replay v1 manifest")
 	_network = network
 	output_path = ProjectSettings.globalize_path(path)
 	journal_path = output_path + ".incomplete"

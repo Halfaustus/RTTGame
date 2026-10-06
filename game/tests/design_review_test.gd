@@ -77,9 +77,10 @@ func run() -> void:
 	check(network._replication_arguments_for_peer("_receive_unit_structures",[[own.structure_snapshot()]],99).is_empty(),"unknown peer receives no internals")
 	check(network._replication_arguments_for_peer("_receive_projectile_events",[[{"target_id":12}],[]],42).is_empty(),"frozen event projection cannot leak enemy identity")
 	own.runtime_weapons[0].bind_target(AttackTarget.unit(enemy))
-	var airborne := ProjectileState.new({"event_id":"existing","position":own.position,"direction":Vector3.FORWARD,"projectile":own.runtime_weapons[0].definition.projectile.snapshot()})
-	network._projectiles = ProjectileSimulation.new()
-	network._projectiles.active[airborne.id] = airborne
+	var airborne := {"event_id":"test_only:existing","emission_order":1,"time_seconds":0.0,"position":own.position,"velocity":Vector3(0,0,-900),"ammo":ConfirmedGameData.new().ammunition("A_556"),"unit_id":10,"owner_player_id":own.owner_player_id,"weapon_instance_id":own.runtime_weapons[0].instance_id}
+	network._projectiles = DB29ProjectileSimulation.new()
+	var airborne_batch: Array[Dictionary] = [airborne]
+	network._projectiles.step(airborne_batch)
 	own.runtime_weapons[0].enabled = false
 	network._aiming.inputs[10] = {"return_fire_locked":true}
 	network._movement.attack_facing_requests[10] = PI
@@ -91,7 +92,7 @@ func run() -> void:
 	check(not network._movement.attack_facing_requests.has(10),"canceled attack facing cannot reappear")
 	check(network._pending_commands.size() == 1 and network._pending_commands[0].peer_id == 77,"queued same-owner commands cleared without affecting others")
 	check(not own.runtime_weapons[0].enabled and network._aiming.inputs[10].return_fire_locked,"E preserves disabled and only-return-fire states")
-	check(network._projectiles.active.get(airborne.id) == airborne and not airborne.terminal,"E leaves already launched projectile intact")
+	check(network._projectiles.active_ids.has(airborne.event_id),"E leaves already launched current projectile intact")
 	own.runtime_weapons[0].bind_target(AttackTarget.ground(Vector3(10,0,100)))
 	network._apply_stop(stop_ids,42)
 	check(own.runtime_weapons[0].target == null,"E also cancels existing persistent ground attack intent")

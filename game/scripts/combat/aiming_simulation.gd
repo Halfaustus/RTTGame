@@ -10,6 +10,7 @@ var inputs: Dictionary = {}
 var profile: Dictionary = {}
 var random := RandomNumberGenerator.new()
 var target_velocities: Dictionary = {}
+var artillery_tasks: Dictionary = {} # Runtime T tasks, not weapon attributes.
 
 func aim_point(weapon: RuntimeWeaponInstance) -> Vector3:
 	if weapon.definition.projectile == null: return weapon.target.position()
@@ -18,9 +19,10 @@ func aim_point(weapon: RuntimeWeaponInstance) -> Vector3:
 
 func _init() -> void: random.seed = Prototype05DCatalog.RANDOM_SEED
 
-func eligibility(weapon: RuntimeWeaponInstance) -> String:
+func eligibility(weapon: RuntimeWeaponInstance,sample: Dictionary = {}) -> String:
 	if not weapon.owning_node_valid(): return "owner_invalid"
 	if units.get(weapon.owner_state().unit_id) != weapon.owner_state(): return "owner_invalid"
+	if weapon.squad_channel != null and weapon.operator_reason != "eligible": return weapon.operator_reason
 	if not weapon.enabled: return "disabled"
 	if weapon.target == null: return "no_target"
 	if not weapon.target.valid(units): return "target_invalid"
@@ -30,11 +32,14 @@ func eligibility(weapon: RuntimeWeaponInstance) -> String:
 	if not visibility.call(weapon.owner_state(),weapon.target): return "not_visible"
 	if weapon.target.kind == AttackTarget.Kind.UNIT and weapon.target.state().team_id == weapon.owner_state().team_id: return "friendly_target"
 	if weapon.target.kind == AttackTarget.Kind.UNIT and not definition.allowed_target_types.has(weapon.target.target_type()): return "type_not_allowed"
-	if weapon.world_position().distance_to(weapon.target.position()) > definition.range_m + Prototype05DCatalog.RANGE_EPSILON_M: return "out_of_range"
-	if not clear_path.call(weapon.world_position(),weapon.target.position()): return "path_blocked"
+	var origin: Vector3 = sample.get("position",weapon.world_position())
+	var target_position: Vector3 = sample.get("target",weapon.target.position())
+	if origin.distance_to(target_position) > definition.range_m + Prototype05DCatalog.RANGE_EPSILON_M: return "out_of_range"
+	var artillery := artillery_tasks.has(weapon.instance_id)
+	if not artillery and not clear_path.call(origin,target_position): return "path_blocked"
 	var state: Dictionary = inputs.get(weapon.owner_state().unit_id,{})
 	if state.get("sprinting",false): return "sprinting"
-	if moving.call(weapon.owner_state().unit_id) and definition.moving_aim_qualification == 0: return "moving_prohibited"
+	if bool(sample.get("moving",moving.call(weapon.owner_state().unit_id))) and definition.moving_aim_qualification == 0: return "moving_prohibited"
 	if state.get("return_fire_locked",false): return "return_fire_locked"
 	if state.get("indoors",false):
 		if definition.indoor_qualification < 0: return "configuration_missing"
@@ -59,7 +64,7 @@ func _prepare() -> Dictionary:
 					var reason := weapon.eligibility_reason
 					weapon.clear_target()
 					weapon.eligibility_reason = reason
-				elif weapon.eligibility_reason in ["disabled","sprinting","moving_prohibited","owner_invalid"]: weapon.reset_aim()
+				elif weapon.eligibility_reason in ["disabled","sprinting","owner_invalid"]: weapon.reset_aim()
 				continue
 			var point := aim_point(weapon)
 			if not point.is_finite():

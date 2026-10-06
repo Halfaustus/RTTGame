@@ -121,8 +121,11 @@ func _run() -> void:
 	world._handle_world_input(key(KEY_Q))
 	check(world._attack_move_armed, "Q retains attack target semantics")
 	world._handle_world_input(key(KEY_ESCAPE))
+	check(world._attack_move_armed and world._pending_actions.is_empty(), "DB33 Esc preserves Q interaction")
 	world._handle_world_input(key(KEY_E))
-	check(world._pending_actions.size() == 1 and world._pending_actions[0].type == "stop", "E queues stop")
+	check(not world._attack_move_armed and world._pending_actions.is_empty(), "first E exits interaction without stop")
+	world._handle_world_input(key(KEY_E))
+	check(world._pending_actions.size() == 1 and world._pending_actions[0].type == "stop", "noninteractive E queues stop")
 	world._pending_actions.clear()
 	# Anchor a formation center at press time even if the view pans before release.
 	camera._center = center

@@ -10,6 +10,11 @@ var maximum_health: float = 100.0
 var health: float = 100.0
 var unit_type: int = UnitDefinition.UnitType.INFANTRY
 var _nose: MeshInstance3D
+var _owner_color := Color.TRANSPARENT
+
+func display_owner_color(color: Color) -> void:
+	_owner_color = color
+	if is_node_ready(): _refresh_combat_visual()
 
 
 func _ready() -> void:
@@ -70,6 +75,7 @@ func display_combat_state(team: int, maximum: float, current: float) -> void:
 func _refresh_combat_visual() -> void:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color(0.25, 0.6, 1.0) if team_id == 1 else Color(1.0, 0.25, 0.15)
+	if team_id == 1 and _owner_color.a > 0: material.albedo_color = _owner_color
 	$MeshInstance3D.material_override = material
 
 

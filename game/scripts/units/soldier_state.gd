@@ -3,7 +3,12 @@ extends RefCounted
 
 const MAXIMUM_HEALTH := 5.0
 var member_id: int
-var health := MAXIMUM_HEALTH
+signal living_changed(member_id: int, living: bool)
+var health := MAXIMUM_HEALTH:
+	set(value):
+		var was_living := health > 0.0
+		health = value
+		if was_living != (health > 0.0): living_changed.emit(member_id,health > 0.0)
 var position := Vector3.ZERO
 var formation_slot := -1
 var hitbox_half_extents := Vector3(0.15,0.4,0.15)

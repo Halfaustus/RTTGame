@@ -8,6 +8,7 @@ var style: UnitMarkerStyle = STYLE
 var unit_kind := UnitDefinition.UnitType.INFANTRY
 var armed := true
 var player_id := 0
+var viewer_player_id := -1 # -1 retains frozen historical presentation.
 var is_order := false
 var selected := false
 var member_count := -1
@@ -59,7 +60,7 @@ func _draw() -> void:
 		var tint := Color.YELLOW if personnel_state == "panic" else Color.RED
 		for strip: int in int(style.body_size.x):
 			draw_rect(Rect2(strip,0,1,style.body_size.y),tint.lerp(style.gray_fill,strip/style.body_size.x))
-	draw_rect(body,style.color_for(player_id),false,style.border_width)
+	draw_rect(body,style.color_for(player_id,viewer_player_id),false,style.border_width)
 	if selected: draw_rect(body.grow(style.selection_margin),Color.WHITE,false,style.selection_width)
 	var font := ThemeDB.fallback_font
 	var symbol := "⊘" if is_order and invalid_destination else style.symbol_for(unit_kind,armed)

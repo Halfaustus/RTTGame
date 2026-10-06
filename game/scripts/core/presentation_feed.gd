@@ -22,7 +22,14 @@ signal weapon_fire_received(event: Dictionary)
 signal projectile_spawn_received(event: Dictionary)
 signal projectile_terminal_received(event: Dictionary)
 var live_projectiles: Dictionary = {}
-var _projectile_order := 0
+var projectile_buffers: Dictionary = {}
+var interpolation_delay := 0.05 # 1.5 snapshots at 30 Hz; client-adjustable.
+const MAX_EXTRAPOLATION_SECONDS := 0.05 # Client clock budget, independent of simulation rate.
+const CLOCK_CORRECTION_SECONDS := 0.05
+var _projectile_clock_initialized := false
+var projectile_authority_time := 0.0
+var projectile_display_time := 0.0
+var _projectile_terminal_times: Dictionary = {}
 var _fire_sequences: Dictionary = {}
 
 func _init() -> void:
@@ -33,24 +40,59 @@ func _clear_structures() -> void:
 	live_structures.clear()
 	_fire_sequences.clear()
 	live_projectiles.clear()
-	_projectile_order = 0
+	projectile_buffers.clear()
+	_projectile_terminal_times.clear()
+	_projectile_clock_initialized = false
+	projectile_authority_time = 0.0
+	projectile_display_time = 0.0
 
 func apply_projectile_spawn(event: Dictionary) -> void:
-	var order := int(event.get("emission_order",0))
-	if order <= _projectile_order: return
-	_projectile_order = order
+	if not event.get("projectile_id") is String: return
+	var id: String = event.projectile_id
+	if _projectile_terminal_times.has(id): return
+	if live_projectiles.has(id) and float(event.get("time_seconds",0)) <= float(live_projectiles[id].get("time_seconds",0)): return
 	live_projectiles[event.projectile_id] = event.duplicate(true)
+	if not projectile_buffers.has(id): projectile_buffers[id] = ProjectileSnapshotBuffer.new()
+	projectile_buffers[id].push(event)
 	projectile_spawn_received.emit(event.duplicate(true))
 
 func apply_projectile_terminal(event: Dictionary) -> void:
+	if not event.get("projectile_id") is String: return
 	if not live_projectiles.has(event.projectile_id): return
-	live_projectiles.erase(event.projectile_id)
+	_projectile_terminal_times[event.projectile_id] = event.get("time_seconds",0.0)
 	projectile_terminal_received.emit(event.duplicate(true))
+	live_projectiles.erase(event.projectile_id)
+	projectile_buffers.erase(event.projectile_id)
+
+func synchronize_projectile_time(value: float) -> void:
+	if not is_finite(value) or value < projectile_authority_time: return
+	projectile_authority_time = value
+	if not _projectile_clock_initialized or live_projectiles.is_empty():
+		projectile_display_time = value
+		_projectile_clock_initialized = true
+
+func advance_projectile_display(delta: float) -> void:
+	if not is_finite(delta) or delta < 0: return
+	# Render-rate clock with smooth catch-up and a bounded cosmetic horizon.
+	var correction := maxf(0,projectile_authority_time-projectile_display_time)*(1.0-exp(-delta/CLOCK_CORRECTION_SECONDS))
+	projectile_display_time = minf(projectile_display_time + delta + correction, projectile_authority_time + maxf(0,interpolation_delay) + MAX_EXTRAPOLATION_SECONDS)
+
+func projectile_visual_state(id: String, delta: float) -> Dictionary:
+	if not projectile_buffers.has(id): return {}
+	return projectile_buffers[id].render(projectile_display_time-interpolation_delay,delta)
 
 func projectile_position(id: String, authority_time: float) -> Vector3:
 	var state: Dictionary = live_projectiles.get(id,{})
 	if state.is_empty(): return Vector3.ZERO
-	return state.position+state.velocity*clampf(authority_time-state.time_seconds,0,state.lifetime_seconds)
+	var elapsed := maxf(0,authority_time-float(state.time_seconds))
+	if state.has("acceleration"):
+		return state.position+state.velocity*elapsed+state.acceleration*(0.5*elapsed*elapsed)
+	return state.position+state.velocity*minf(elapsed,float(state.lifetime_seconds)) # Legacy-only event shape.
+
+func projectile_velocity(id: String, authority_time: float) -> Vector3:
+	var state: Dictionary = live_projectiles.get(id,{})
+	if state.is_empty(): return Vector3.ZERO
+	return state.velocity+state.get("acceleration",Vector3.ZERO)*maxf(0,authority_time-float(state.time_seconds))
 
 func _remove_structure(id: int) -> void:
 	live_structures.erase(id)

@@ -2,6 +2,8 @@ extends SceneTree
 
 var checks := 0
 var failures := 0
+# LEGACY TEST ONLY values preserve old aiming-interface regression. Current
+# weapon/ammo DATA acceptance is in confirmed_game_data_test and DB33 tests.
 var catalog := Prototype05DCatalog.new()
 var aim := AimingSimulation.new()
 var visible := true
@@ -13,7 +15,7 @@ func check(value: bool, label: String) -> void:
 	checks += 1
 	if not value:
 		failures += 1
-		push_error("FAIL 0.5D: "+label)
+		push_error("FAIL 0.5D legacy TEST ONLY: "+label)
 func unit(definition: UnitDefinition, position: Vector3 = Vector3.ZERO) -> UnitState:
 	var state := UnitState.new(next_id,42,position)
 	next_id += 1
@@ -43,7 +45,7 @@ func run() -> void:
 		for offset: float in [-0.01,0.0,0.01]:
 			target.position = weapon.world_position()+Vector3(0,0,-(weapon.definition.range_m+offset))
 			check((aim.eligibility(weapon) == "eligible") == (offset <= 0),id+" range "+str(offset))
-	check(catalog.weapons.rifle.ammo_definitions[0] == catalog.weapons.lmg.ammo_definitions[0],"shared standard ammo")
+	check(catalog.weapons.rifle.ammo_definitions[0] == catalog.weapons.lmg.ammo_definitions[0],"LEGACY shared standard fixture only; DATA ammo records distinct")
 	check(catalog.weapons.lmg.range_m == 600 and catalog.weapons.lmg.ammo_definitions[0].anchor_distance_m == 400,"independent range and decay endpoint")
 	var lmg := fixture("lmg").runtime_weapons[0]
 	target.position = lmg.world_position()+Vector3(0,0,-500)
@@ -53,11 +55,11 @@ func run() -> void:
 	var assault := unit(catalog.squad(true))
 	var defense := unit(catalog.squad(false))
 	check(assault.members.size() == 8 and assault.health == 40 and defense.health == 40,"eight people five health")
-	check(assault.runtime_weapons.size() == 8 and defense.runtime_weapons.size() == 8,"no extra rifle or inferred five launchers")
+	check(assault.runtime_weapons.size() == 2 and defense.runtime_weapons.size() == 2,"two model channels, no inferred launchers")
 	check(assault.weapon_summary()[0].count == 2 and assault.weapon_summary()[0].ammunition.recoilless_ap == 8 and assault.weapon_summary()[0].ammunition.recoilless_he == 8,"two guns sixteen total rounds")
 	check(assault.weapon_summary()[1].count == 6 and assault.weapon_summary()[1].ammunition.standard == 900,"six rifles 900 rounds")
 	check(defense.weapon_summary()[0].ammunition.standard == 1500 and defense.weapon_summary()[1].ammunition.standard == 900,"defense ammo totals")
-	check(defense.unassigned_inventory.rocket_ap == 5,"unassigned squad stock")
+	check(defense.unassigned_inventory.rocket_ap == 5,"LEGACY unassigned fixture stock, not AT4 capacity or actual inventory")
 	check(defense.unassigned_weapon_stock()[0].count == null and defense.unassigned_weapon_stock()[0].assignment_pending,"rocket count not inferred from five stock")
 	check(catalog.weapons.shotgun.capacity == 10 and catalog.default_inventory.shotgun.shotgun == 50 and catalog.weapons.shotgun.game_projectile_interval == 1 and catalog.weapons.shotgun.range_m == -1,"confirmed shotgun data preserved with unknown range")
 	check(assault.definition.weapon_allocations[0].occupied_slots.size() == 2,"gun reserves primary secondary")
@@ -67,7 +69,7 @@ func run() -> void:
 	var another := unit(assault.definition)
 	check(another.runtime_weapons[0] != assault.runtime_weapons[0] and another.runtime_weapons[0].definition == assault.runtime_weapons[0].definition and another.runtime_weapons[0].instance_id != assault.runtime_weapons[0].instance_id,"unique runtime shared definition")
 	another.runtime_weapons[0].inventory.recoilless_ap = 0
-	check(assault.runtime_weapons[0].inventory.recoilless_ap == 4,"independent inventory")
+	check(assault.runtime_weapons[0].inventory.recoilless_ap == 8,"independent inventory")
 	for model: String in ["a","b","c"]:
 		var vehicle := unit(catalog.weapon_slot_fixture(model))
 		check(vehicle.mounts.size() == 2 and vehicle.runtime_weapons.size() == (4 if model == "c" else 3),model+" weapon mount counts")
@@ -109,9 +111,10 @@ func run() -> void:
 	gun.bind_target(AttackTarget.unit(target))
 	tick(1)
 	check(gun.aim_progress > 0 and not gun.aim_timer_complete,"two seconds gun timer")
+	var before_move_progress := gun.aim_progress
 	moving = true
 	aim.advance(0.1)
-	check(gun.eligibility_reason == "moving_prohibited" and gun.aim_progress == 0,"prohibited movement clears aim")
+	check(gun.eligibility_reason == "moving_prohibited" and gun.aim_progress == before_move_progress,"DB33 prohibited movement pauses aim without resetting progress")
 	moving = false
 	var rocket := fixture("rocket").runtime_weapons[0]
 	rocket.bind_target(AttackTarget.unit(target))
@@ -183,7 +186,7 @@ func integration() -> void:
 	network._movement.initialize_navigation()
 	network._ensure_deployment_ready()
 	network._initialize_rebels()
-	check(network._authoritative_units[1].runtime_weapons.size() == 8,"enemy initialized")
+	check(network._authoritative_units[1].runtime_weapons.size() == 2,"enemy initialized")
 	network._peer_players[42] = 1
 	network.deployment.register_player(1,1,0)
 	var armed_entry := false
@@ -194,7 +197,7 @@ func integration() -> void:
 	network.deployment.place_order(1,purchase.order_id,Vector3(10,0,110))
 	for frame: int in 180: network._run_server_tick(PackedInt32Array([42]))
 	var order: Dictionary = network.deployment._orders[purchase.order_id]
-	check(order.status == "generated" and network._authoritative_units[order.unit_id].runtime_weapons.size() == 8,"purchased initialized")
+	check(order.status == "generated" and network._authoritative_units[order.unit_id].runtime_weapons.size() == 2,"purchased initialized")
 	network.timeline.begin_tick()
 	network.timeline.enter_phase("session")
 	network._apply_peer_join(77)
@@ -235,7 +238,7 @@ func benchmark() -> void:
 		for frame: int in 120: scene.advance(1.0/60)
 		var elapsed := Time.get_ticks_usec()-start
 		check(scene.profile.eligibility_checks == weapons*120,"linear checks "+str(count))
-		check(scene.profile.node_rotations == count/2*10*120,"shared node single rotation "+str(count))
+		check(scene.profile.node_rotations == count*2*120,"shared node single rotation "+str(count))
 		print("AIM_BENCH units=%d weapons=%d avg_us=%.2f checks_tick=%d rotations_tick=%d path_queries=0" % [count,weapons,elapsed/120.0,weapons,count/2*10])
 		var serialization_start := Time.get_ticks_usec()
 		var payload: Array[Dictionary] = []
@@ -280,7 +283,7 @@ func additional_checks() -> void:
 	squad.configure(1,catalog.squad(false))
 	movement.add_unit(squad)
 	simulation.units[5002] = squad
-	var soldier_weapon := squad.runtime_weapons[2]
+	var soldier_weapon := squad.runtime_weapons[1]
 	soldier_weapon.bind_target(AttackTarget.unit(target))
 	var member_position := squad.members[2].position
 	simulation.advance(0.1)
@@ -305,7 +308,8 @@ func additional_checks() -> void:
 	simulation.advance(0.1)
 	check(cannon.target == null and cannon.eligibility_reason == "target_invalid","registry removal invalidates stable reference")
 	squad.members[2].health = 0
-	check(simulation.eligibility(soldier_weapon) == "owner_invalid","dead Soldier cannot retain aiming authority")
+	squad.refresh_weapon_operators()
+	check(soldier_weapon.configured_count == 6 and soldier_weapon.node_id != "3" and soldier_weapon.operable_count == 5,"dead Soldier loses ordinary weapon while stable channel retains other sources")
 	var feed := PresentationFeed.new()
 	var structure := vehicle.structure_snapshot()
 	feed.apply_live_structure(structure)

@@ -80,9 +80,11 @@ func _run() -> void:
 	escape.keycode = KEY_ESCAPE
 	escape.pressed = true
 	world._handle_world_input(escape)
+	check(world._right_pressed and world._right_dragging and world._pending_actions.is_empty(), "DB33 Esc preserves held interaction and sends no command")
+	check(world._selection_rectangle.get_parent().get_node("GameMenu").visible, "DB33 Esc opens menu")
 	press.pressed = false
 	world._handle_world_input(press)
-	check(world._pending_actions.is_empty() and not world._right_pressed, "Esc cancels held right button without submission")
+	check(world._pending_actions.size() == 1 and world._pending_actions[0].type == "move" and not world._right_pressed, "release completes preserved right-button command")
 	world.queue_free()
 	await process_frame
 	print("Prototype 0.2G isolated checks: ", "PASS" if failures == 0 else "FAIL")

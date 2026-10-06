@@ -199,10 +199,10 @@ func server_checks() -> void:
 	model._consume_deployment_requests(PackedInt32Array([42,99]))
 	check(model._replication_queue.size() == 2 and model._replication_queue[0].peer_id == 42 and model._replication_queue[0].arguments[0].player_id == 1 and not model._replication_queue[1].arguments[0].ok,"foreign cancel rejected and only sender private state returned")
 	model._replication_queue.clear()
-	for tick: int in 180: model._run_server_tick(PackedInt32Array([42,99]))
+	for tick: int in 3*model.timeline.tick_hz: model._run_server_tick(PackedInt32Array([42,99]))
 	check(model.deployment._orders[a.order_id].status == "generated" and model.deployment._orders[b.order_id].status == "generated","production pipeline multi generation")
 	var state: UnitState = model._authoritative_units[model.deployment._orders[a.order_id].unit_id]
-	check(state.members.size() == 8 and model._presentation_snapshot(state).member_count == 8,"purchased squad and live marker metadata")
+	check(state.members.size() == state.definition.member_count and model._presentation_snapshot(state).member_count == state.definition.member_count,"purchased squad and live marker metadata")
 	check(model._presentation_snapshot(state).owner_player_id == 1 and model._presentation_snapshot(state).definition_id == state.definition.resource_path,"public unit identity uses match player not peer")
 	check(not state.snapshot().has("member_count"),"new UI metadata excluded from frozen v1 snapshot")
 	model._pending_sessions.append({"type":"leave","peer_id":99})

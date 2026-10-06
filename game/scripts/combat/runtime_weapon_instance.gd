@@ -23,6 +23,12 @@ var aim_timer_complete := false
 var orientation_ready := false
 var is_aimed := false
 var fire_state := WeaponFireState.new()
+var squad_channel: WeakRef
+var configured_count := 1
+var operable_count := 1
+var operator_reason := "eligible"
+# Internal command budget, not a unit or weapon definition parameter.
+var forced_emissions_remaining := -1
 
 func _init(state: UnitState, owning_slot: WeaponSlotState, spatial_node: RefCounted) -> void:
 	owner = weakref(state)
@@ -39,11 +45,12 @@ func initialize_first_magazine() -> void:
 	# Inventory is TOTAL available ammunition, including ready rounds (DB22).
 	# Readiness never transfers or adds stock; ammo is selected only at firing.
 	pending_rounds = 0
+	if pending_capacity() <= 0: return
 	for ammo: AmmoDefinition in definition.ammo_definitions:
 		var available: int = maxi(0,int(inventory.get(ammo.ammo_id,0)))
 		pending_rounds += available
-		if pending_rounds >= definition.capacity:
-			pending_rounds = definition.capacity
+		if pending_rounds >= pending_capacity():
+			pending_rounds = pending_capacity()
 			return
 
 func spatial_node() -> RefCounted: return node.get_ref()
@@ -54,6 +61,7 @@ func owning_node_valid() -> bool:
 	var value := spatial_node()
 	if state == null or value == null or slot_state() == null or state.health <= 0.0: return false
 	if not state.runtime_weapons.has(self): return false
+	if squad_channel != null: return true # Personnel eligibility is separate from ownership.
 	if node_kind == WeaponAllocation.NodeKind.SOLDIER: return state.members.has(value) and value.health > 0.0
 	if node_kind == WeaponAllocation.NodeKind.MOUNT: return state.mounts.has(value)
 	return value == state
@@ -69,12 +77,17 @@ func world_position() -> Vector3:
 	return origin + slot_state().definition.local_position.rotated(Vector3.UP,world_yaw())
 
 func bind_target(value: AttackTarget, manual: bool = true) -> void:
+	forced_emissions_remaining = -1
 	if target == null or not target.same(value): reset_aim()
 	target = value
 	manual_target = manual
 	can_attack = false
 	is_aimed = false
 	orientation_ready = false
+
+func bind_single_ground_target(point: Vector3) -> void:
+	bind_target(AttackTarget.ground(point),true)
+	forced_emissions_remaining = 1
 
 func reset_aim() -> void:
 	aim_progress = 0.0
@@ -84,6 +97,7 @@ func reset_aim() -> void:
 	is_aimed = false
 
 func clear_target() -> void:
+	forced_emissions_remaining = -1
 	target = null
 	can_attack = false
 	eligibility_reason = "no_target"
@@ -94,6 +108,19 @@ func has_ammunition() -> bool:
 		if int(inventory.get(ammo.ammo_id,0)) >= definition.consumption_per_projectile: return true
 	return false
 
+func pending_capacity() -> int:
+	return definition.capacity # DATA capacity belongs to the one channel flow.
+
+func shot_interval() -> float:
+	return definition.game_projectile_interval / configured_count
+
+func loading_seconds() -> float:
+	return definition.preparation_seconds / configured_count if definition.preparation_cadence else definition.preparation_seconds
+
+func consume(ammo_id: String, count: int) -> void:
+	inventory[ammo_id] -= count
+	if squad_channel != null and squad_channel.get_ref() != null: squad_channel.get_ref().consume(self,ammo_id,count)
+
 func snapshot() -> Dictionary:
 	var result := {"instance_id":instance_id,"definition_id":definition.definition_id,"node_kind":node_kind,"node_id":node_id,
 		"target_id":target.unit_id if target != null else 0,"can_attack":can_attack,"reason":eligibility_reason,
@@ -103,6 +130,13 @@ func snapshot() -> Dictionary:
 	result["fire"] = fire_state.snapshot()
 	result["inventory"] = inventory.duplicate()
 	result["pending_rounds"] = pending_rounds
+	result["configured_count"] = configured_count
+	result["operable_count"] = operable_count
+	result["operator_reason"] = operator_reason
+	result["forced_emissions_remaining"] = forced_emissions_remaining
+	if owning_node_valid():
+		result["weapon_position"] = world_position()
+		result["muzzle_position"] = DirectBallistics.muzzle(self)
 	return result
 
 func observation() -> Dictionary:

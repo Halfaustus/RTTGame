@@ -22,11 +22,14 @@ static func lead(origin: Vector3, point: Vector3, velocity: Vector3, speed: floa
 	return {"valid":true,"point":point+velocity*time,"seconds":time}
 
 static func muzzle(weapon: RuntimeWeaponInstance, inputs: Dictionary = {}) -> Vector3:
+	return sampled_muzzle(weapon,weapon.world_position(),weapon.world_yaw(),inputs)
+
+static func sampled_muzzle(weapon: RuntimeWeaponInstance,position: Vector3,yaw: float,inputs: Dictionary = {}) -> Vector3:
 	if inputs.has("house_center"): return inputs.house_center
 	var offset := Prototype05FConfig.SOLDIER_MUZZLE
 	if weapon.node_kind == WeaponAllocation.NodeKind.HULL: offset = Prototype05FConfig.HULL_MUZZLE
 	elif weapon.node_kind == WeaponAllocation.NodeKind.MOUNT: offset = Prototype05FConfig.MAIN_MUZZLE if weapon.node_id == "main" else Prototype05FConfig.COMMANDER_MUZZLE
-	return weapon.world_position()+offset.rotated(Vector3.UP,weapon.world_yaw())
+	return position+offset.rotated(Vector3.UP,yaw)
 
 static func spread_offset(random: RandomNumberGenerator, radius: float, direction: Vector3) -> Vector3:
 	var right := direction.cross(Vector3.UP).normalized()

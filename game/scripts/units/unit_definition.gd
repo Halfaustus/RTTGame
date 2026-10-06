@@ -4,6 +4,7 @@ extends Resource
 enum UnitType { INFANTRY, ARMORED_VEHICLE }
 
 @export var unit_type: UnitType = UnitType.INFANTRY
+@export var configuration_source: String = "unconfigured"
 # Generic isolated-test defaults; active presets configure movement explicitly.
 @export var hardened_speed: float = 4.0
 @export var unhardened_speed: float = 4.0
@@ -51,6 +52,8 @@ func spatial_valid() -> bool:
 
 func weapon_allocations_valid() -> bool:
 	var occupied := {}
+	var models := {}
+	var quantities := {}
 	var identifiers := {}
 	for mount: WeaponMountDefinition in mounts:
 		if mount == null: return false
@@ -63,9 +66,17 @@ func weapon_allocations_valid() -> bool:
 		if allocation.node_kind == WeaponAllocation.NodeKind.UNASSIGNED_SQUAD_STOCK: continue
 		if allocation.slot_id.is_empty(): return false
 		if allocation.node_kind == WeaponAllocation.NodeKind.SOLDIER and (unit_type != UnitType.INFANTRY or allocation.member_id < 1 or allocation.member_id > member_count): return false
+		if allocation.node_kind == WeaponAllocation.NodeKind.SOLDIER:
+			var model := allocation.definition.definition_id
+			if model.is_empty(): return false
+			if models.has(model) and models[model] != allocation.definition: return false
+			models[model] = allocation.definition
+			quantities[model] = int(quantities.get(model,0))+1
+			if allocation.definition.maximum_squad_count > 0 and quantities[model] > allocation.definition.maximum_squad_count: return false
 		if allocation.node_kind == WeaponAllocation.NodeKind.MOUNT and not identifiers.has(allocation.mount_id): return false
 		var node_id := str(allocation.member_id) if allocation.node_kind == WeaponAllocation.NodeKind.SOLDIER else allocation.mount_id
-		var slots: Array[String] = allocation.occupied_slots if not allocation.occupied_slots.is_empty() else [allocation.slot_id]
+		var slots: Array[String] = []
+		slots.assign(allocation.occupied_slots if not allocation.occupied_slots.is_empty() else [allocation.slot_id])
 		for slot_id: String in slots:
 			var key := "%s/%s/%s" % [allocation.node_kind,node_id,slot_id]
 			if occupied.has(key): return false

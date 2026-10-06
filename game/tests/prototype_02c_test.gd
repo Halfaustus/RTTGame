@@ -135,7 +135,7 @@ func _orders_and_obstacles() -> void:
 		_validate(vehicle, vehicle.move_paths([id])[0])
 	vehicle.advance(0.1)
 	var current := vehicle._units[1].position
-	_check(vehicle.request_stop([1], 42) == [1], "S stop still accepted")
+	_check(vehicle.request_stop([1], 42) == [1], "stop command interface still accepted; no S shortcut")
 	vehicle.advance(0.1)
 	_check(vehicle._units[1].position == current and not vehicle.is_moving(1), "stopped vehicle stays")
 	_order(vehicle, B, MovementSimulation.MoveMode.FAST)

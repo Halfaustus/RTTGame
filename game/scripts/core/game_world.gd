@@ -10,6 +10,7 @@ const MOVEMENT_PATH_VISUAL: Script = preload("res://scripts/core/movement_path_v
 const SHOT_VISUAL: Script = preload("res://scripts/core/shot_visual.gd")
 
 @export var replay_mode := false
+@export var movement_config: MovementConfig = MOVEMENT_CONFIG
 var presentation_source: PresentationFeed
 var view_player_id := 0
 
@@ -20,6 +21,7 @@ var _movement_paths: Dictionary[int, MeshInstance3D] = {}
 var _route_points: Dictionary[int, PackedVector3Array] = {}
 var _route_progress: Dictionary[int, int] = {}
 var _pending_actions: Array[Dictionary] = []
+var _fire_mode := "" # Minimal G ground / T single-point-one-shot interaction.
 var _right_pressed := false
 var _right_start: Vector2
 var _right_ground: Variant
@@ -41,6 +43,9 @@ var _unit_markers: Dictionary[int, UnitMarker] = {}
 var _marker_layer: Control
 var _selection_collection: Dictionary[int, Node3D] = {}
 var _cycling_selection := false
+var _projectile_visuals: ProjectileVisuals
+var _artillery_preview: ArtilleryPreview
+var _artillery_distance: Label
 
 @onready var _units: Node3D = $Units
 @onready var _camera: Camera3D = $Units/Camera3D
@@ -49,6 +54,10 @@ var _cycling_selection := false
 func _ready() -> void:
 	if presentation_source == null:
 		presentation_source = PresentationFeed.new() if replay_mode else NetworkManager.presentation
+	if not replay_mode and "--server" not in OS.get_cmdline_user_args() and "--test-role=server" not in OS.get_cmdline_user_args():
+		_projectile_visuals = ProjectileVisuals.new()
+		_projectile_visuals.setup(presentation_source)
+		add_child(_projectile_visuals)
 	presentation_source.reset_received.connect(_reset_replicated_units)
 	_camera.rotation_started.connect(_on_camera_rotation_started)
 	presentation_source.unit_spawn_received.connect(_on_unit_spawn_received)
@@ -88,6 +97,17 @@ func _ready() -> void:
 	_movement_mode_hint.hide()
 	overlay.add_child(_movement_mode_hint)
 	if not replay_mode:
+		if _projectile_visuals != null:
+			_artillery_preview = ArtilleryPreview.new()
+			add_child(_artillery_preview)
+			_artillery_distance = Label.new()
+			_artillery_distance.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_artillery_distance.add_theme_color_override("font_color",Color.RED)
+			_artillery_distance.add_theme_color_override("font_outline_color",Color.BLACK)
+			_artillery_distance.add_theme_constant_override("outline_size",3)
+			_artillery_distance.hide()
+			overlay.add_child(_artillery_distance)
+			NetworkManager.deployment_state_received.connect(func(_state): _refresh_player_colors())
 		_deployment_ui = DeploymentUI.new()
 		_deployment_ui.setup(_camera, _ground_at)
 		_deployment_ui.input_ownership_changed.connect(func(active: bool):
@@ -138,7 +158,13 @@ func _handle_world_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey:
-		if event.keycode == KEY_TAB and event.pressed and not event.echo and get_viewport().gui_get_focus_owner() == null:
+		if event.keycode in [KEY_G,KEY_T] and event.pressed and not event.echo and not event.ctrl_pressed and not event.alt_pressed and not event.shift_pressed and get_viewport().gui_get_focus_owner() == null:
+			_consume_move_mode()
+			_fire_mode = "artillery" if event.keycode == KEY_T else "ground_fire"
+			_movement_mode_hint.text = "T 单点一发：右键选择落点，E 退出" if _fire_mode == "artillery" else "G 强制地面开火：右键选择位置，E 退出"
+			_movement_mode_hint.show()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_TAB and event.pressed and not event.echo and get_viewport().gui_get_focus_owner() == null:
 			_cycle_marker_selection(event.shift_pressed)
 			get_viewport().set_input_as_handled()
 		elif _is_reverse_move_key(event):
@@ -151,7 +177,7 @@ func _handle_world_input(event: InputEvent) -> void:
 			_toggle_fast_move()
 			get_viewport().set_input_as_handled()
 		elif _is_stop_key(event):
-			if _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed or _left_pressed or _box_dragging:
+			if not _fire_mode.is_empty() or _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed or _left_pressed or _box_dragging:
 				_consume_move_mode()
 				_cancel_right_drag()
 				_cancel_drag()
@@ -171,7 +197,7 @@ func _handle_world_input(event: InputEvent) -> void:
 			_cancel_right_drag()
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			if _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed:
+			if not _fire_mode.is_empty() or _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed:
 				_consume_move_mode()
 				_cancel_right_drag()
 				_cancel_drag()
@@ -200,6 +226,12 @@ func _handle_world_input(event: InputEvent) -> void:
 				_right_mode = _current_move_mode()
 			elif _right_pressed:
 				_right_dragging = _right_dragging or event.position.distance_to(_right_start) > DRAG_THRESHOLD
+				if not _fire_mode.is_empty():
+					_queue_action({"type":_fire_mode,"position":_ground_at(event.position)})
+					_consume_move_mode()
+					_cancel_right_drag()
+					get_viewport().set_input_as_handled()
+					return
 				_queue_action({"type": "move", "position": _right_start if _right_dragging else event.position, "end": event.position, "dragged": _right_dragging, "mode": _right_mode,
 					"ground": _right_ground if _right_dragging else _ground_at(event.position), "tip": _ground_at(event.position)})
 				_consume_move_mode()
@@ -249,6 +281,7 @@ func _is_fast_move_key(event: InputEventKey) -> bool:
 
 
 func _toggle_fast_move() -> void:
+	_fire_mode = ""
 	_cancel_right_drag()
 	_cancel_attack_move()
 	_cancel_reverse_move()
@@ -272,6 +305,7 @@ func _current_move_mode() -> int:
 
 
 func _consume_move_mode() -> int:
+	_fire_mode = ""
 	var mode := _current_move_mode()
 	_cancel_attack_move()
 	_cancel_fast_move()
@@ -292,6 +326,7 @@ func _cancel_attack_move() -> void:
 
 
 func _arm_attack_move() -> void:
+	_fire_mode = ""
 	_cancel_fast_move()
 	_cancel_reverse_move()
 	_cancel_drag()
@@ -307,6 +342,7 @@ func _is_reverse_move_key(event: InputEventKey) -> bool:
 
 
 func _arm_reverse_move() -> void:
+	_fire_mode = ""
 	_cancel_fast_move()
 	_cancel_attack_move()
 	_cancel_drag()
@@ -316,6 +352,8 @@ func _arm_reverse_move() -> void:
 
 
 func _cancel_reverse_move() -> void:
+	_fire_mode = ""
+	_clear_artillery_preview()
 	_reverse_move_armed = false
 	if not _fast_move_armed and not _attack_move_armed:
 		_movement_mode_hint.hide()
@@ -351,6 +389,9 @@ func _physics_process(_delta: float) -> void:
 				_request_move_at(action["position"], action.get("mode", MovementSimulation.MoveMode.BASIC), action.get("end", action["position"]), action.get("dragged", false), action.get("ground"), action.get("tip"))
 			"stop":
 				_request_stop_selected()
+			"ground_fire", "artillery":
+				if action.position is Vector3 and not replay_mode:
+					NetworkManager.request_ground_fire(_command_unit_ids(MovementSimulation.MoveMode.BASIC),action.position,action.type == "artillery",1)
 	_pending_actions.clear()
 	set_physics_process(false)
 
@@ -429,6 +470,7 @@ func _clear_selection() -> void:
 
 
 func _reset_replicated_units() -> void:
+	if _projectile_visuals != null: _projectile_visuals.clear()
 	# A connection starts with a complete live snapshot, never the previous session's visuals.
 	_clear_selection()
 	_clear_movement_paths()
@@ -469,6 +511,7 @@ func _on_unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3
 func _on_unit_combat_state_received(unit_id: int, team_id: int, maximum_health: float, health: float) -> void:
 	if _visual_units.has(unit_id):
 		_visual_units[unit_id].display_combat_state(team_id, maximum_health, health)
+		_refresh_player_colors()
 
 
 func _on_unit_type_received(unit_id: int, unit_type: int) -> void:
@@ -483,6 +526,34 @@ func _on_unit_identity_received(id: int, player: int, definition: String) -> voi
 	_visual_units[id].definition_id = definition
 	_unit_markers[id].player_id = player
 	_unit_markers[id].refresh()
+	_refresh_player_colors()
+
+func _refresh_player_colors() -> void:
+	if replay_mode: return
+	for id: int in _visual_units:
+		var unit: Node3D = _visual_units[id]
+		var marker: UnitMarker = _unit_markers[id]
+		marker.viewer_player_id = NetworkManager.local_player_id
+		unit.display_owner_color(marker.style.color_for(unit.owner_player_id,marker.viewer_player_id))
+		marker.refresh()
+
+func _clear_artillery_preview() -> void:
+	if _artillery_preview != null: _artillery_preview.clear()
+	if _artillery_distance != null: _artillery_distance.hide()
+
+func _update_artillery_preview(position: Vector2) -> void:
+	if replay_mode or _fire_mode != "artillery" or _camera.is_rotating():
+		_clear_artillery_preview()
+		return
+	var point: Variant = _ground_at(position)
+	if not point is Vector3 or not point.is_finite(): _clear_artillery_preview(); return
+	var structures: Array[Dictionary] = []
+	for id: int in _selected_units:
+		if _selected_units[id].owner_player_id != NetworkManager.local_player_id or NetworkManager.local_player_id <= 0: continue
+		if presentation_source.live_structures.has(id): structures.append(presentation_source.live_structures[id])
+	_artillery_distance.text = _artillery_preview.show_targets(structures,point)
+	_artillery_distance.position = position+Vector2(16,20)
+	_artillery_distance.show()
 
 func _on_unit_member_count_received(id: int,count: int) -> void:
 	if _unit_markers.has(id):
@@ -490,6 +561,7 @@ func _on_unit_member_count_received(id: int,count: int) -> void:
 		_unit_markers[id].refresh()
 
 func _process(_delta: float) -> void:
+	if _artillery_preview != null: _update_artillery_preview(get_viewport().get_mouse_position())
 	for id: int in _unit_markers:
 		var unit := _visual_units[id]
 		_unit_markers[id].project(_camera,unit.global_position)
@@ -575,7 +647,7 @@ func _ground_at(screen_position: Vector2) -> Variant:
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
 		return null
-	return Plane(Vector3.UP, MOVEMENT_CONFIG.ground_height).intersects_ray(camera.project_ray_origin(screen_position), camera.project_ray_normal(screen_position))
+	return Plane(Vector3.UP, movement_config.ground_height).intersects_ray(camera.project_ray_origin(screen_position), camera.project_ray_normal(screen_position))
 
 
 func _view_owner_id() -> int:
@@ -640,7 +712,7 @@ func _update_formation_preview(end: Vector2) -> void:
 		return
 	var forward: Vector3 = (tip - center).normalized()
 	var side := forward.cross(Vector3.UP)
-	var spacing := MOVEMENT_CONFIG.unit_width + MOVEMENT_CONFIG.destination_gap
+	var spacing := movement_config.unit_width + movement_config.destination_gap
 	for i: int in ids.size():
 		var slot: Vector3 = center + side * (i - (ids.size() - 1) * 0.5) * spacing + Vector3.UP * 0.08
 		var arrow := MOVEMENT_PATH_VISUAL.new() as MeshInstance3D
@@ -720,7 +792,7 @@ func _update_unit_path(unit_id: int) -> void:
 	var remaining := _remaining_visual_route(unit_id, unit.position)
 	for index: int in remaining.size():
 		var point := remaining[index]
-		point.y = MOVEMENT_CONFIG.ground_height + 0.04
+		point.y = movement_config.ground_height + 0.04
 		remaining[index] = _units.transform * point
 	_movement_paths[unit_id].update_route(remaining)
 

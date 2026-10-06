@@ -1,0 +1,130 @@
+{
+  "source": {
+    "catalog": "game/scripts/combat/prototype_05d_catalog.gd",
+    "configuration": "Prototype05DCatalog.new().squad(false)",
+    "history": "docs/PROTOTYPE_05D.md",
+    "references": "Legacy catalog _init() weapon and ammunition identifiers; not shared() / use_confirmed_performance() DATA identifiers.",
+    "scope": "Test-only legacy unit configuration copy; explicitly assigned fields only; not connected to runtime."
+  },
+  "resource_name": "test_only_motorized_defense",
+  "configuration_source": "test_only:05d_squad",
+  "member_count": 8,
+  "maximum_health": 40,
+  "hardened_speed": 5,
+  "unhardened_speed": 5,
+  "turn_speed_degrees": 360,
+  "protection_kinetic": 6,
+  "protection_chemical": 6,
+  "ability_tags": ["sprint", "smoke_1"],
+  "weapon_allocations": [
+    {
+      "definition_id": "lmg",
+      "node_kind": "SOLDIER",
+      "member_id": 1,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 750},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 0
+    },
+    {
+      "definition_id": "lmg",
+      "node_kind": "SOLDIER",
+      "member_id": 2,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 750},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 0
+    },
+    {
+      "definition_id": "rifle",
+      "node_kind": "SOLDIER",
+      "member_id": 3,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 150},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 1
+    },
+    {
+      "definition_id": "rifle",
+      "node_kind": "SOLDIER",
+      "member_id": 4,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 150},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 1
+    },
+    {
+      "definition_id": "rifle",
+      "node_kind": "SOLDIER",
+      "member_id": 5,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 150},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 1
+    },
+    {
+      "definition_id": "rifle",
+      "node_kind": "SOLDIER",
+      "member_id": 6,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 150},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 1
+    },
+    {
+      "definition_id": "rifle",
+      "node_kind": "SOLDIER",
+      "member_id": 7,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 150},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 1
+    },
+    {
+      "definition_id": "rifle",
+      "node_kind": "SOLDIER",
+      "member_id": 8,
+      "mount_id": "",
+      "slot_id": "primary",
+      "occupied_slots": ["primary"],
+      "initial_inventory": {"standard": 150},
+      "initial_pending": 0,
+      "direction_primary": true,
+      "orientation_priority": 1,
+      "retention_priority": 1
+    },
+    {
+      "definition_id": "rocket",
+      "node_kind": "UNASSIGNED_SQUAD_STOCK",
+      "initial_inventory": {"rocket_ap": 5}
+    }
+  ]
+}

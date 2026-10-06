@@ -99,6 +99,7 @@ func exclusions(source_unit: int, houses: Array[int]) -> Array[RID]:
 	return result
 
 func sweep(start: Vector3, end: Vector3, radius: float, exclude: Array[RID], mask: int = 3) -> Dictionary:
+	if not space.is_valid(): return {"failure":"physics_space_unavailable"}
 	var direct := PhysicsServer3D.space_get_direct_state(space)
 	if direct == null: return {"failure":"physics_space_unavailable"}
 	if radius == 0:
@@ -144,3 +145,24 @@ func fire_clear(weapon: RuntimeWeaponInstance, origin: Vector3, point: Vector3, 
 	if weapon.target.kind == AttackTarget.Kind.FORCED_GROUND: return true
 	var hit := sweep(origin,point,weapon.definition.projectile.radius_m if weapon.definition.projectile != null else 0,exclusions(weapon.owner_state().unit_id,[int(inputs.get("house_id",0)),int(inputs.get("target_house_id",0))]),2)
 	return not hit.has("failure") and (hit.is_empty() or hit.get("team_id",-1) != weapon.owner_state().team_id)
+
+# DB29 static point query. Only overlap/tied hits require additional rays;
+# there is no full static-body scan. Keep the legacy sphere/ray API unchanged.
+func static_point_sweep(start: Vector3,end: Vector3,exclude: Array[RID],seconds: float) -> Dictionary:
+	var best := sweep(start,end,0.0,exclude,1)
+	if best.is_empty() or best.has("failure"): return best
+	var first_fraction: float = best.fraction
+	var endpoint := start.lerp(end,minf(1.0,first_fraction+ProjectileUnitMotion.TIME_TOLERANCE/maxf(seconds,ProjectileUnitMotion.TIME_TOLERANCE)))
+	var ignored := exclude.duplicate()
+	var current := best
+	while not current.is_empty():
+		var id: String = current.object_id
+		if not bodies.has(id) or ignored.has(bodies[id].body): return {"failure":"static_contact_identity_invalid"}
+		ignored.append(bodies[id].body)
+		current = sweep(start,endpoint,0.0,ignored,1)
+		if current.has("failure"): return current
+		if current.is_empty(): break
+		current.fraction = start.distance_to(current.point)/maxf(start.distance_to(end),0.000001)
+		if absf(float(current.fraction-first_fraction))*seconds > ProjectileUnitMotion.TIME_TOLERANCE: break
+		if current.object_id < best.object_id: best = current
+	return best

@@ -250,6 +250,7 @@ func _process(_delta: float) -> void:
 
 func _configure_marker(marker: UnitMarker, order: Dictionary) -> void:
 	marker.player_id = int(state.get("player_id",0))
+	marker.viewer_player_id = int(state.get("player_id",0))
 	for entry: Dictionary in state.get("catalog",[]):
 		if entry.config_id == order.config_id:
 			marker.unit_kind = int(entry.unit_type)

@@ -2,6 +2,9 @@ extends SceneTree
 
 var checks := 0
 var failures := 0
+# Historical isolated flow fixture, not current DATA performance acceptance.
+# Current values/multi-shot time contracts: confirmed_game_data_test and
+# db29_combat_timeline_test; this suite preserves old interface coverage.
 var catalog := Prototype05DCatalog.new()
 var aiming: AimingSimulation
 var fire: FireSimulation
@@ -19,7 +22,7 @@ func check(value: bool, label: String) -> void:
 	checks += 1
 	if not value:
 		failures += 1
-		push_error("FAIL 0.5E: "+label)
+		push_error("FAIL 0.5E legacy TEST ONLY: "+label)
 func setup(id: String, stock: Dictionary = {}) -> void:
 	aiming = AimingSimulation.new()
 	fire = FireSimulation.new()
@@ -138,7 +141,9 @@ func run() -> void:
 	moving = true
 	check(step(1).is_empty() and weapon.fire_state.reason == "moving_prohibited","moving permission revalidated")
 	setup("rifle")
-	check(step(60).size() == 1 and weapon.inventory.standard == 147,"large dt no historical burst")
+	# Do not decide backlog policy. Duplicate/zero-time debit protection is tested
+	# independently; lawful fixed-step multi-shot behavior has its own DB suite.
+	check(step(0).size() == 1 and weapon.inventory.standard == 147,"ready emission debits exactly once at current time")
 	check(step(0).is_empty(),"zero dt cannot bypass interval")
 	selection_checks()
 	extra_checks()
@@ -192,8 +197,8 @@ func selection_checks() -> void:
 	check(AmmoSelection.penetration(catalog.ammunition.standard,400) == 5 and AmmoSelection.penetration(catalog.ammunition.standard,500) == 5 and AmmoSelection.penetration(catalog.ammunition.standard,600) == 5,"shared rifle LMG curve endpoint and plateau")
 	check(AmmoSelection.penetration(catalog.ammunition.pdw,200) == 5,"PDW anchor")
 	check(AmmoSelection.expected_damage(catalog.ammunition.standard,12,6,0,0) == 1,"combined damage not multiplied by three")
-	check(AmmoSelection.expected_damage(catalog.ammunition.standard,5,10,0,0) == 0,"kinetic half armor threshold")
-	check(is_equal_approx(AmmoSelection.expected_damage(catalog.ammunition.recoilless_ap,400,400,0,0),4),"chemical formal formula preview only")
+	check(AmmoSelection.expected_damage(catalog.ammunition.standard,5,10,0,0) == 0.5,"DB29 kinetic partial damage without cutoff")
+	check(is_equal_approx(AmmoSelection.expected_damage(catalog.ammunition.recoilless_ap,400,400,0,0),4),"current chemical formula using LEGACY test ammo, not DATA CG damage")
 	check(is_equal_approx(AmmoSelection.expected_damage(catalog.ammunition.standard,12,6,0.5,0.5),0.75),"proportional cover and ignore")
 	setup("recoilless")
 	var selection := AmmoSelection.select(weapon,{"cover_reductions":[0.2,0.5]})
@@ -240,7 +245,7 @@ func vehicle_checks() -> void:
 	check(victim.health == 40,"vehicle emissions no damage")
 	var defense := UnitState.new(4,42,Vector3.ZERO)
 	defense.configure(1,catalog.squad(false))
-	check(defense.runtime_weapons.size() == 8 and defense.unassigned_inventory.rocket_ap == 5,"unassigned rockets never instantiate")
+	check(defense.runtime_weapons.size() == 2 and defense.unassigned_inventory.rocket_ap == 5,"unassigned rockets never instantiate")
 	var other := UnitState.new(5,42,Vector3.ZERO)
 	other.configure(1,vehicle.definition)
 	check(other.runtime_weapons[0].pending_rounds == 10 and other.runtime_weapons[0].fire_state.loading_progress == 1 and other.runtime_weapons[0].inventory == {"cannon_a_ap":10,"cannon_a_he":40},"shared definitions independent flow and stock")
@@ -279,15 +284,15 @@ func network_checks() -> void:
 	var enemy: UnitState = network._authoritative_units[1]
 	# Place the existing enemy on a verified clear test lane; retain real LOS checks.
 	enemy.position = Vector3(20,0.5,100)
-	var stock_before := state.runtime_weapons[2].inventory.duplicate()
+	var stock_before := state.runtime_weapons[1].inventory.duplicate()
 	for instance: RuntimeWeaponInstance in state.runtime_weapons: instance.bind_target(AttackTarget.unit(enemy))
 	var emitted: Array[Dictionary] = []
 	network.weapon_fire_received.connect(func(event): emitted.append(event))
 	var hp := enemy.health
 	for index: int in 1200: network._run_server_tick(PackedInt32Array([42]))
-	check(emitted.is_empty() and state.runtime_weapons[2].inventory == stock_before,"unobserved production enemy is not firing permission")
+	check(emitted.is_empty() and state.runtime_weapons[1].inventory == stock_before,"unobserved production enemy is not firing permission")
 	check(enemy.health == hp and not network.timeline.records.any(func(row): return row.type == "shot"),"no old damage or replay shot side effects")
-	check(network.INTERNAL_STATE_REPLICATION_HZ == 10 and state.structure_snapshot().weapons[2].has("fire"),"existing ten Hz flow state replication")
+	check(network.INTERNAL_STATE_REPLICATION_HZ == 10 and state.structure_snapshot().weapons[1].has("fire"),"existing ten Hz channel flow state replication")
 	var before: int = network.presentation._fire_sequences.size()
 	network._receive_weapon_fires(emitted)
 	check(network.presentation._fire_sequences.size() == before,"unauthenticated local RPC rejected")

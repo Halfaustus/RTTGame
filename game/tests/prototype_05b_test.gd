@@ -19,8 +19,8 @@ func unit(id: int, definition: UnitDefinition) -> UnitState:
 func run() -> void:
 	var squad := unit(1,INF)
 	var six := unit(2,SIX)
-	check(squad.members.size() == 8 and squad.maximum_health == 40 and squad.health == 40,"formal eight-person squad")
-	check(six.members.size() == 6 and six.maximum_health == 30,"formal six-person squad")
+	check(squad.members.size() == 8 and squad.maximum_health == 40 and squad.health == 40,"TEST ONLY eight-person squad, five HP rule")
+	check(six.members.size() == 6 and six.maximum_health == 30,"TEST ONLY six-person squad, not formal composition")
 	check(squad.members[0] != squad.members[1] and squad.members[0].health == 5,"independent HP objects")
 	squad.members[0].health = 2
 	check(squad.health == 37 and squad.members[1].health == 5,"derived aggregate HP")
@@ -117,23 +117,23 @@ func run() -> void:
 	network._movement.initialize_navigation()
 	network._initialize_rebels()
 	var valid_enemy := true
-	for state: UnitState in network._authoritative_units.values(): valid_enemy = valid_enemy and state.members.size() == 8 and state.members[0].position.distance_to(state.position) < 2
+	for state: UnitState in network._authoritative_units.values(): valid_enemy = valid_enemy and state.members.size() == state.definition.member_count and state.members[0].position.distance_to(state.position) < 2
 	check(valid_enemy,"enemy production initialization")
 	network.deployment.register_player(1,1,0)
 	network._peer_players[42] = 1
 	var purchase: Dictionary = network.deployment.buy_order(1,"test.rifle","ground.west")
 	check(purchase.ok and network.deployment.place_order(1,purchase.order_id,Vector3(10,0,110)).ok,"purchase placement")
-	for tick: int in 180: network._run_server_tick(PackedInt32Array([42]))
+	for tick: int in 3*network.timeline.tick_hz: network._run_server_tick(PackedInt32Array([42]))
 	var row: Dictionary = network.deployment._orders[purchase.order_id]
 	check(row.status == "generated","order completes")
 	var bought: UnitState = network._authoritative_units[row.unit_id]
-	check(bought.members.size() == 8 and bought.health == 40 and bought.members[0].position.distance_to(bought.position) < 2,"purchased members initialized at real spawn")
+	check(bought.members.size() == bought.definition.member_count and bought.health == 5*bought.definition.member_count and bought.members[0].position.distance_to(bought.position) < 2,"purchased members initialized at real spawn")
 	network.timeline.begin_tick()
 	network.timeline.enter_phase("session")
 	network._apply_peer_join(77)
 	var free_valid := false
 	for state: UnitState in network._authoritative_units.values():
-		if state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.INFANTRY: free_valid = state.members.size() == 8
+		if state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.INFANTRY: free_valid = state.members.size() == state.definition.member_count
 	check(free_valid,"free production initialization")
 	check(not network._authoritative_units.values().any(func(state): return state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.ARMORED_VEHICLE),"retired vehicles never free-spawn")
 	network.timeline.enter_phase("replication")

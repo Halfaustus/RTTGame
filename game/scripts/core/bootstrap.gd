@@ -5,6 +5,11 @@ var _shutdown_token := ""
 var _control_elapsed := 0.0
 var _stopping := false
 
+func _enter_tree() -> void:
+	if not NetworkManager.configure_active_test_map():
+		push_error("Active TEST ONLY battlefield initialization failed")
+		get_tree().quit(1)
+
 func _ready() -> void:
 	if "--server" in OS.get_cmdline_user_args():
 		_start_server()

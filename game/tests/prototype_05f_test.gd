@@ -1,5 +1,10 @@
 extends SceneTree
 
+# LEGACY interface/geometry compatibility suite. Sphere, constant-speed and
+# expiry fixtures below are historical behavior, never DB33 acceptance.
+# Current gravity/30Hz/point contracts: gravity_ballistics_test,
+# db29_projectile_test, db29_combat_timeline_test and movement_sampling_test.
+
 var checks := 0
 var failures := 0
 var simulation: ProjectileSimulation
@@ -68,7 +73,7 @@ func run() -> void:
 	ends = simulation.advance(0.1,1)
 	check(ends.size() == 1 and ends[0].hit_unit_id == 202,"self excluded, friendly non original type collides")
 	check(victim.health == hp,"no vehicle damage")
-	check(owner.runtime_weapons.size() == 8,"existing runtime composition retained")
+	check(owner.runtime_weapons.size() == 2,"two stable model channels retain physical source composition")
 	states.erase(202)
 	simulation.collision.sync_units(states)
 	check(not simulation.collision.bodies.has("unit:202"),"removed bodies evicted")
@@ -139,7 +144,7 @@ func ballistic_checks() -> void:
 	check(DirectBallistics.muzzle(main,{"house_center":Vector3(4,2,4)}) == Vector3(4,2,4),"indoor origin uses house center")
 	var defense := UnitState.new(10,42,Vector3.ZERO)
 	defense.configure(1,catalog.squad(false))
-	check(defense.runtime_weapons.size() == 8 and defense.unassigned_inventory.rocket_ap == 5,"unassigned rockets never instantiate")
+	check(defense.runtime_weapons.size() == 2 and defense.unassigned_inventory.rocket_ap == 5,"unassigned rockets never instantiate")
 	var feed := PresentationFeed.new()
 	var fixture := ProjectileState.new(event()).spawn_event()
 	feed.apply_projectile_spawn(fixture)
@@ -194,7 +199,7 @@ func additional_checks() -> void:
 	aiming.clear_path = func(_a,_b): return true
 	aiming.moving = func(_id): return false
 	aiming.target_velocities[2] = Vector3(30,0,0)
-	var weapon := owner.runtime_weapons[2]
+	var weapon := owner.runtime_weapons[1]
 	weapon.bind_target(AttackTarget.unit(target))
 	for frame: int in 120: aiming.advance(1.0/60)
 	check(weapon.is_aimed and weapon.desired_yaw < 0,"actual Soldier yaw tracks lead before emission")
@@ -223,7 +228,7 @@ func additional_checks() -> void:
 	target = UnitState.new(2,0,Vector3(0,0,-500))
 	target.configure(2,catalog.squad(false))
 	owner.configure(1,catalog.squad(false))
-	weapon = owner.runtime_weapons[2]
+	weapon = owner.runtime_weapons[1]
 	target.position = Vector3(0,0,-500)
 	weapon.bind_target(AttackTarget.unit(target))
 	var friend := UnitState.new(3,42,Vector3(0,0,-10))
@@ -258,7 +263,7 @@ func additional_checks() -> void:
 		aim_target.configure(2,catalog.squad(false))
 		aiming.units = {50:soldier,51:aim_target}
 		aiming.target_velocities.clear()
-		soldier.runtime_weapons[2].bind_target(AttackTarget.unit(aim_target))
+		soldier.runtime_weapons[1].bind_target(AttackTarget.unit(aim_target))
 		aiming.advance(2)
 		var firing := FireSimulation.new()
 		var batch := firing.advance(0,1,aiming)

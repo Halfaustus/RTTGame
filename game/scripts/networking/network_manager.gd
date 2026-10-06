@@ -37,6 +37,7 @@ var _pending_deployment_requests: Array[Dictionary] = []
 var _dirty_deployment: Dictionary[int, bool] = {}
 var deployment := DeploymentEconomy.new()
 var local_deployment_state: Dictionary = {}
+var local_player_id := 0 # Authenticated domain identity received in own account state.
 var _peer_players: Dictionary[int, int] = {}
 var _players: Dictionary[int, Dictionary] = {}
 var _next_player_id := 1
@@ -55,12 +56,22 @@ var _replication_elapsed: float = 0.0
 var _combat := CombatSimulation.new(MovementSimulation.MAP_DEFINITION)
 var _aiming := AimingSimulation.new()
 var _fire := FireSimulation.new()
-var _projectiles: ProjectileSimulation
+var _projectiles: DB29ProjectileSimulation
+var _combat_timeline := DB29CombatTimeline.new()
+var _server_clock := FixedStepClock.new()
+var _artillery := ArtillerySimulation.new()
 var _previous_ballistic_positions: Dictionary = {}
 var legacy_combat_fixture_enabled := false # Explicit historical test opt-in only.
-var _weapon_presets: Array[UnitDefinition] = [preload("res://data/05d/assault.tres"),preload("res://data/05d/defense.tres")]
+var _weapon_presets: Array[UnitDefinition] = [preload("res://data/units/db33_active_test_squad.tres"),preload("res://data/units/db33_active_test_squad.tres")]
 var _rebels_initialized: bool = false
 var _player_spawn_index: int = 1
+
+# Explicit activity selection; historical isolated models retain their map.
+func configure_active_test_map() -> bool:
+	if deployment.is_ready() or not _authoritative_units.is_empty() or timeline.tick != 0 or legacy_combat_fixture_enabled:
+		return false
+	_movement = MovementSimulation.new(preload("res://data/db33_active_test_movement.tres"))
+	return _movement.initialize_navigation()
 
 
 func _ready() -> void:
@@ -89,6 +100,9 @@ func _ready() -> void:
 
 
 func start_server(port: int = DEFAULT_PORT) -> bool:
+	if not _recording_path.is_empty() and _movement._config == preload("res://data/db33_active_test_movement.tres"):
+		push_error("Active TEST ONLY battlefield recording requires a future explicit replay format decision")
+		return false
 	if not _ensure_deployment_ready():
 		return false
 	# Finish the synchronous static grid before accepting connections or commands.
@@ -161,6 +175,8 @@ func connect_to_server(
 
 
 func _on_connected_to_server() -> void:
+	local_player_id = 0
+	presentation.reset_received.emit()
 	print(
 		"Connected to server. Local peer ID: %d"
 		% multiplayer.get_unique_id()
@@ -168,10 +184,14 @@ func _on_connected_to_server() -> void:
 
 
 func _on_connection_failed() -> void:
+	local_player_id = 0
+	presentation.reset_received.emit()
 	print("Connection to server failed.")
 
 
 func _on_server_disconnected() -> void:
+	local_player_id = 0
+	presentation.reset_received.emit()
 	print("Disconnected from server.")
 
 
@@ -196,13 +216,13 @@ func _apply_peer_join(peer_id: int) -> void:
 			_queue_replication("_receive_unit_snapshot", [snapshot], peer_id)
 		if _projectiles != null:
 			var active_spawns: Array[Dictionary] = []
-			for projectile: ProjectileState in _projectiles.active.values(): active_spawns.append(projectile.spawn_event())
+			active_spawns = _projectiles.active_spawns()
 			active_spawns.sort_custom(func(a,b): return a.emission_order < b.emission_order)
-			if not active_spawns.is_empty(): _queue_replication("_receive_projectile_events",[active_spawns,[]],peer_id)
-	for index: int in MOVEMENT_CONFIG.units_per_peer:
+			if not active_spawns.is_empty(): _queue_replication("_receive_projectile_events",[active_spawns,[],_projectiles.time_seconds],peer_id)
+	for index: int in _movement._config.units_per_peer:
 		var unit_id := _next_unit_id
 		_next_unit_id += 1
-		var spawn: Vector3 = MOVEMENT_CONFIG.spawn_position(_player_spawn_index)
+		var spawn: Vector3 = _movement._config.spawn_position(_player_spawn_index)
 		_player_spawn_index += 1
 		var state := UnitState.new(unit_id, peer_id, spawn)
 		state.owner_player_id = player_id
@@ -217,6 +237,7 @@ func _apply_peer_join(peer_id: int) -> void:
 		deployment.register_live_unit(unit_id, player_id, state.definition, state.generated_tick)
 		_movement.add_unit(state)
 		_combat.add_unit(state)
+		if not legacy_combat_fixture_enabled: _aiming.inputs[state.unit_id] = {"moving_spread_multiplier":1.5} # TEST ONLY, never DATA.
 		timeline.append("event", "spawn", ReplayFormat.unit_state(state, _movement))
 		print("Authoritative unit %d created. Owner peer: %d; match player: %d" % [unit_id, peer_id, player_id])
 		if not multiplayer.get_peers().is_empty():
@@ -239,6 +260,7 @@ func _initialize_rebels() -> void:
 		_authoritative_units[state.unit_id] = state
 		_movement.add_unit(state)
 		_combat.add_unit(state)
+		if not legacy_combat_fixture_enabled: _aiming.inputs[state.unit_id] = {"moving_spread_multiplier":1.5} # TEST ONLY, never DATA.
 
 
 func live_snapshots() -> Array[Dictionary]:
@@ -302,6 +324,18 @@ func request_stops(unit_ids: Array[int]) -> void:
 		return
 	_submit_stop.rpc_id(1, unit_ids)
 
+func request_ground_fire(unit_ids: Array[int],point: Vector3,artillery: bool = false,count: int = 1) -> void:
+	if unit_ids.is_empty() or multiplayer.is_server(): return
+	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED: return
+	_submit_ground_fire.rpc_id(1,unit_ids,point,artillery,count)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _submit_ground_fire(unit_ids: Array[int],point: Vector3,artillery: bool,count: int) -> void:
+	if not multiplayer.is_server(): return
+	var sender := multiplayer.get_remote_sender_id()
+	if not multiplayer.get_peers().has(sender): return
+	_queue_command({"type":"artillery" if artillery else "ground_fire","unit_ids":unit_ids.duplicate(),"target":point,"count":count,"mode":-1,"facing":Vector3.ZERO,"group":false},sender)
+
 
 @rpc("any_peer", "call_remote", "reliable")
 func _submit_stop(unit_ids: Array[int]) -> void:
@@ -318,6 +352,7 @@ func _apply_stop(unit_ids: Array[int], sender: int) -> Dictionary:
 	var positions: Array[Vector3] = []
 	for unit_id: int in accepted:
 		positions.append(_authoritative_units[unit_id].position)
+		_artillery.cancel(_authoritative_units[unit_id])
 		for instance: RuntimeWeaponInstance in _authoritative_units[unit_id].runtime_weapons: instance.clear_target()
 		_movement.attack_facing_requests.erase(unit_id)
 		# Remove any older buffered position before broadcasting the current stop position.
@@ -377,14 +412,21 @@ func _receive_move_paths(unit_ids: Array[int], paths: Array[PackedVector3Array])
 	presentation.unit_move_paths_received.emit(unit_ids, paths)
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
-	_run_server_tick(multiplayer.get_peers())
+	if legacy_combat_fixture_enabled:
+		_run_server_tick(multiplayer.get_peers())
+	else:
+		_server_clock.advance(delta,func() -> bool:
+			var before := timeline.tick
+			_run_server_tick(multiplayer.get_peers())
+			return timeline.tick == before+1 and not _combat_timeline.halted)
 
 
 func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	# One authoritative fixed step. Network callback arrival never mutates simulation.
+	if not legacy_combat_fixture_enabled and _combat_timeline.halted: return
 	if not _ensure_deployment_ready():
 		return
 	timeline.begin_tick()
@@ -406,39 +448,52 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	_aiming.visibility = func(owner: UnitState, target: AttackTarget): return target.kind == AttackTarget.Kind.FORCED_GROUND or (target.valid(_authoritative_units) and _authoritative_units[target.unit_id].team_id == owner.team_id)
 	_aiming.clear_path = _combat.has_line_of_sight
 	_aiming.moving = _movement.is_moving
-	_movement.attack_facing_requests = _aiming.hull_requests()
-	for state: UnitState in _authoritative_units.values():
-		if not _previous_ballistic_positions.has(state.unit_id): _previous_ballistic_positions[state.unit_id] = state.position
-	if legacy_combat_fixture_enabled: _movement.update_attack_engagement(_combat)
-	var changed := _movement.advance(delta)
-	_aiming.target_velocities.clear()
-	for state: UnitState in _authoritative_units.values():
-		_aiming.target_velocities[state.unit_id] = (state.position-_previous_ballistic_positions[state.unit_id])/delta
-		_previous_ballistic_positions[state.unit_id] = state.position
-	for id: int in _previous_ballistic_positions.keys():
-		if not _authoritative_units.has(id): _previous_ballistic_positions.erase(id)
+	var changed: Dictionary = {}
+	var fixed_result := {"emissions":[],"events":[]}
+	if legacy_combat_fixture_enabled:
+		_movement.attack_facing_requests = _aiming.hull_requests()
+		_movement.update_attack_engagement(_combat)
+		changed = _movement.advance(delta)
+	else:
+		if _projectiles == null:
+			_projectiles = _combat_timeline.projectiles
+			_projectiles.configure_bounds(Rect2(_movement._config.minimum_xz,_movement._config.maximum_xz-_movement._config.minimum_xz))
+			_projectiles.collision.initialize_map(MovementSimulation.MAP_DEFINITION,_movement._config)
+			_combat_timeline.fire = _fire
+			_fire.fire_path_permission = func(_weapon,_origin,_point,_inputs): return true # Static eligibility and sampled friendly check own permission.
+		fixed_result = _combat_timeline.step_movement(_movement,_aiming)
+		changed = fixed_result.changed
 	_pending_positions.merge(changed, true)
 	for id: int in changed:
 		_dirty_units[id] = true
 	# A target entered range during this tick: park before applying firing eligibility.
 	if legacy_combat_fixture_enabled: _movement.update_attack_engagement(_combat)
 	timeline.enter_phase("combat")
-	_aiming.advance(delta)
-	if not legacy_combat_fixture_enabled:
-		if _projectiles == null:
-			_projectiles = ProjectileSimulation.new()
-			_projectiles.bounds = Rect2(MOVEMENT_CONFIG.minimum_xz,MOVEMENT_CONFIG.maximum_xz-MOVEMENT_CONFIG.minimum_xz)
-			_projectiles.collision.initialize_map(MovementSimulation.MAP_DEFINITION,MOVEMENT_CONFIG)
-		_projectiles.collision.sync_units(_authoritative_units)
-		_fire.fire_path_permission = _projectiles.collision.fire_clear
-		var terminals := _projectiles.advance(delta,timeline.tick) # Advance older shots before spawning end-of-tick shots.
-		for event: Dictionary in terminals: projectile_terminal_received.emit(event.duplicate(true))
-		if not terminals.is_empty() and not connected_peers.is_empty(): _queue_replication("_receive_projectile_events",[[],terminals])
-		var emissions := _fire.advance(delta,timeline.tick,_aiming)
-		var spawns := _projectiles.consume(emissions)
+	if legacy_combat_fixture_enabled: _aiming.advance(delta)
+	else:
+		var spawns: Array[Dictionary] = []
+		var terminals: Array[Dictionary] = []
+		for event: Dictionary in fixed_result.events:
+			if event.reason == "spawn": spawns.append(event)
+			else: terminals.append(event)
 		for event: Dictionary in spawns: projectile_spawn_received.emit(event.duplicate(true))
-		if not spawns.is_empty() and not connected_peers.is_empty(): _queue_replication("_receive_projectile_events",[spawns,[]])
-		for emission: Dictionary in emissions: weapon_fire_received.emit(emission.duplicate(true))
+		for event: Dictionary in terminals: projectile_terminal_received.emit(event.duplicate(true))
+		if not connected_peers.is_empty() and (not spawns.is_empty() or not terminals.is_empty() or not _projectiles.active_slots.is_empty()):
+			# Reuse the existing public shape for discrete current motion samples.
+			var snapshots: Array[Dictionary] = spawns.duplicate()
+			for active: Dictionary in _projectiles.active_spawns(false): snapshots.append(active)
+			_queue_replication("_receive_projectile_events",[snapshots,terminals,_projectiles.time_seconds])
+		var emissions: Array[Dictionary] = []
+		for event: Dictionary in fixed_result.emissions:
+			# Cache references stay server-only; explicit value event for presentation.
+			var row := event.duplicate()
+			row.erase("ammo")
+			row.ammo_definition_id = event.ammo.ammo_id
+			row.emission_sequence = int(str(event.event_id).get_slice(":",str(event.event_id).get_slice_count(":")-1))
+			row.slot_id = ""
+			emissions.append(row)
+			weapon_fire_received.emit(row.duplicate(true))
+		_artillery.after_emissions(fixed_result.emissions,_authoritative_units)
 		if not emissions.is_empty() and not connected_peers.is_empty(): _queue_replication("_receive_weapon_fires",[emissions])
 	# New emissions never enter legacy 'shot' (absolute HP result) or frozen v1.
 	var combat_result: Dictionary = _combat.advance(delta, _movement) if legacy_combat_fixture_enabled else {"shots":[],"deaths":[]}
@@ -479,7 +534,7 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 				_queue_replication("_receive_deployment_state", [deployment.export_player(player_id)], peer_id)
 		_dirty_deployment.clear()
 	_replication_elapsed += delta
-	if _replication_elapsed >= MOVEMENT_CONFIG.replication_interval or not _movement.has_active_moves():
+	if _replication_elapsed >= _movement._config.replication_interval or not _movement.has_active_moves():
 		if not _pending_positions.is_empty() and not multiplayer.get_peers().is_empty():
 			var unit_ids: Array[int] = []
 			var positions: Array[Vector3] = []
@@ -506,8 +561,10 @@ func _receive_weapon_fires(events: Array) -> void:
 	for event: Dictionary in events: presentation.apply_fire_event(event)
 
 @rpc("authority", "call_remote", "reliable")
-func _receive_projectile_events(spawns: Array, terminals: Array) -> void:
+func _receive_projectile_events(spawns: Array, terminals: Array, authority_time: float = -1.0) -> void:
 	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	if not is_finite(authority_time) or authority_time < 0: return
+	presentation.synchronize_projectile_time(authority_time)
 	for event: Dictionary in spawns: presentation.apply_projectile_spawn(event)
 	for event: Dictionary in terminals: presentation.apply_projectile_terminal(event)
 
@@ -593,7 +650,8 @@ func _consume_commands(connected_peers: PackedInt32Array) -> void:
 			payload.target = [target.x, target.y, target.z] if target.is_finite() else null
 			payload.facing = [facing.x, facing.y, facing.z] if facing.is_finite() else null
 			payload.group = command.group
-		timeline.append("command", command.type, payload)
+		# New fire requests are outside frozen input metadata; v1 records state.
+		if command.type in ["move","stop"]: timeline.append("command", command.type, payload)
 
 
 func _execute_command(command: Dictionary) -> Dictionary:
@@ -613,6 +671,26 @@ func _execute_command(command: Dictionary) -> Dictionary:
 		elif not multiplayer.get_peers().is_empty():
 			_queue_replication("_receive_unit_stops", [stopped.unit_ids, stopped.positions])
 			_queue_replication("_receive_unit_orientations", [stopped.unit_ids, _unit_yaws(stopped.unit_ids)])
+	elif command.type in ["ground_fire","artillery"]:
+		if not command.target is Vector3 or not command.target.is_finite():
+			result.rejection = "invalid fire position"
+		elif not _movement._validate_target(command.target).is_empty():
+			result.rejection = _movement._validate_target(command.target)
+		else:
+			for id: int in ids:
+				if not _authoritative_units.has(id): continue
+				var unit: UnitState = _authoritative_units[id]
+				if unit.owner_peer_id != sender or unit.health <= 0: continue
+				var reason := ""
+				if command.type == "artillery": reason = _artillery.submit(unit,command.target,int(command.count),_aiming,_movement)
+				elif not unit.runtime_weapons.any(func(weapon): return weapon.definition.definition_id != "W_M252"): reason = "artillery_requires_t"
+				else:
+					_artillery.cancel(unit)
+					_movement.request_stop([id],sender)
+					for weapon: RuntimeWeaponInstance in unit.runtime_weapons:
+						if weapon.definition.definition_id != "W_M252": weapon.bind_single_ground_target(command.target)
+				if reason.is_empty(): result.unit_ids.append(id)
+				else: result.failed_ids.append(id); result.rejection = reason
 	elif command.group:
 		result = _movement.request_group_move(ids, sender, command.target, command.mode, command.facing)
 		if not result.has("failed_ids"):
@@ -624,6 +702,10 @@ func _execute_command(command: Dictionary) -> Dictionary:
 		if result.rejection.is_empty():
 			result.unit_ids = ids
 	for id: int in result.unit_ids:
+		if command.type == "move":
+			_artillery.cancel(_authoritative_units[id])
+			for weapon: RuntimeWeaponInstance in _authoritative_units[id].runtime_weapons:
+				if weapon.forced_emissions_remaining >= 0: weapon.clear_target()
 		_dirty_units[id] = true
 	if not result.unit_ids.is_empty():
 		print("%s accepted: peer %d, units %s" % [command.type.capitalize(), sender, result.unit_ids])
@@ -633,6 +715,7 @@ func _execute_command(command: Dictionary) -> Dictionary:
 			_queue_replication("_receive_move_targets", [accepted, _movement.move_targets(accepted)], sender)
 			_queue_replication("_receive_move_paths", [accepted, _movement.move_paths(accepted)], sender)
 	else:
+		if result.rejection.is_empty(): result.rejection = "no owned eligible units"
 		print("%s rejected: peer %d: %s" % [command.type.capitalize(), sender, result.rejection])
 	return result
 
@@ -672,7 +755,7 @@ func capture_replay_checkpoint() -> Dictionary:
 
 
 func _queue_replication(method: String, arguments: Array, peer_id: int = -1) -> void:
-	if legacy_combat_fixture_enabled:
+	if legacy_combat_fixture_enabled and method != "_receive_projectile_events":
 		_replication_queue.append({"method": method, "arguments": arguments.duplicate(true), "peer_id": peer_id})
 		return
 	var recipients: Array = _peer_players.keys() if peer_id == -1 else [peer_id]
@@ -683,9 +766,9 @@ func _queue_replication(method: String, arguments: Array, peer_id: int = -1) -> 
 
 func _replication_arguments_for_peer(method: String, arguments: Array, peer_id: int) -> Array:
 	if not _peer_players.has(peer_id): return []
-	# Until a detection provider exists, enemy visibility is not established.
-	# Projectile payload projection remains frozen: withhold rather than invent a schema.
-	if method in ["_receive_projectile_events","_receive_weapon_fires"]: return []
+	# DB34 makes projectile motion public, without revealing source/impact identity.
+	if method == "_receive_projectile_events": return ProjectileProjection.batch(arguments)
+	if method == "_receive_weapon_fires": return []
 	if method == "_receive_unit_structures":
 		var structures: Array[Dictionary] = []
 		for structure: Dictionary in arguments[0]:
@@ -722,6 +805,7 @@ func _flush_replication() -> void:
 
 
 func _ensure_deployment_ready() -> bool:
+	if not legacy_combat_fixture_enabled and timeline.tick == 0: timeline.tick_hz = 30
 	if deployment.is_ready():
 		return true
 	var config: DeploymentConfig = DEPLOYMENT_CONFIG
@@ -733,7 +817,11 @@ func _ensure_deployment_ready() -> bool:
 			var active_entry := entry.duplicate()
 			active_entry.definition = _weapon_presets[0]
 			config.catalog.append(active_entry)
-	var error := deployment.initialize(config, MOVEMENT_CONFIG, MovementSimulation.MAP_DEFINITION, timeline.tick_hz)
+			var mortar_entry := active_entry.duplicate()
+			mortar_entry.config_id = "test.mortar"
+			mortar_entry.definition = preload("res://data/units/db33_active_test_mortar.tres")
+			config.catalog.append(mortar_entry) # Existing test economy values; no formal unit pricing.
+	var error := deployment.initialize(config, _movement._config, MovementSimulation.MAP_DEFINITION, timeline.tick_hz)
 	if not error.is_empty():
 		push_error("Deployment configuration rejected: " + error)
 		return false
@@ -840,6 +928,7 @@ func _receive_deployment_state(state: Dictionary) -> void:
 	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1:
 		return
 	local_deployment_state = state.duplicate(true)
+	local_player_id = int(state.get("player_id",0))
 	deployment_state_received.emit(state.duplicate(true))
 
 
@@ -863,6 +952,7 @@ func _spawn_deployment(order: Dictionary, position: Vector3, entry: Dictionary, 
 	_authoritative_units[state.unit_id] = state
 	_movement.add_unit(state)
 	_combat.add_unit(state)
+	if not legacy_combat_fixture_enabled: _aiming.inputs[state.unit_id] = {"moving_spread_multiplier":1.5} # TEST ONLY, never DATA.
 	var movement := _movement.deploy_move(state, order.destination, order.move_mode, entry.width)
 	# Existing v1 unit/path state and spawn event suffice; economic/order state is
 	# deliberately absent from the frozen replay format.

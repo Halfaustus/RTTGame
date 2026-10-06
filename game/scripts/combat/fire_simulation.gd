@@ -7,13 +7,16 @@ var profile: Dictionary = {}
 var emission_order := 0
 var random := RandomNumberGenerator.new()
 var fire_path_permission: Callable # Production friendly-block query; fixtures can inject explicitly.
+var execution_mode := "" # One timing writer per simulation; do not mix legacy/fixed clocks.
 const TIME_EPSILON := 0.000000001 # Numerical endpoint tolerance, not gameplay delay.
 
 func _init() -> void: random.seed = Prototype05FConfig.RANDOM_SEED
 
 func advance(delta: float, tick: int, aiming: AimingSimulation) -> Array[Dictionary]:
 	var events: Array[Dictionary] = []
+	if execution_mode == "fixed": return events
 	if not is_finite(delta) or delta < 0 or tick <= last_tick: return events
+	execution_mode = "legacy"
 	last_tick = tick
 	time_seconds += delta
 	for state: UnitState in aiming.units.values():
@@ -98,15 +101,15 @@ func advance(delta: float, tick: int, aiming: AimingSimulation) -> Array[Diction
 				event.explosion_radius_m = ammo.explosion_radius_m # Static only; no explosion queries.
 				event.ammo_snapshot = {"ammo_id":ammo.ammo_id,"damage_type":ammo.damage_type,"nominal_damage":ammo.nominal_damage,"penetration_upper":ammo.penetration_upper,"anchor_distance_m":ammo.anchor_distance_m,"anchor_penetration":ammo.anchor_penetration,"minimum_penetration":ammo.minimum_penetration,"test_curve":ammo.test_curve,"test_log_shape":ammo.test_log_shape,"explosion_radius_m":ammo.explosion_radius_m,"suppression":ammo.suppression,"module_damage":ammo.module_damage}
 			emission_order += 1
-			weapon.inventory[ammo.ammo_id] -= count
+			weapon.consume(ammo.ammo_id,count)
 			weapon.pending_rounds -= count
 			fire.last_ammo_id = ammo.ammo_id
 			fire.last_emission_tick = tick
 			fire.emission_count += 1
 			fire.can_fire = true # Permission at emission, not a promise for a second call.
 			fire.phase = WeaponFireState.Phase.READY
-			fire.interval_remaining = definition.game_projectile_interval
-			if weapon.pending_rounds < count:
+			fire.interval_remaining = weapon.shot_interval()
+			if definition.preparation_cadence or weapon.pending_rounds < count:
 				fire.loading = true
 				fire.loading_progress = 0
 			events.append(event)
@@ -115,12 +118,20 @@ func advance(delta: float, tick: int, aiming: AimingSimulation) -> Array[Diction
 			fire.phase = WeaponFireState.Phase.LOADING if fire.loading else WeaponFireState.Phase.INTERVAL
 	return events
 
+# DB29 prepared, stationary-channel integration. Legacy advance remains an
+# isolated compatibility path and cannot mutate a fixed scheduler's state.
+func advance_fixed(aiming: AimingSimulation,frame: FiringFrame = null) -> Array[Dictionary]:
+	if execution_mode == "legacy": return []
+	execution_mode = "fixed"
+	return FixedFireScheduler.step(self,aiming,frame)
+
 func _advance_loading(weapon: RuntimeWeaponInstance, delta: float, inputs: Dictionary) -> void:
 	var fire := weapon.fire_state
 	if not fire.loading: return
+	if weapon.squad_channel != null and weapon.operator_reason != "eligible": return
 	var module: float = inputs.get("loading_module_multiplier",1.0)
 	var personnel: float = 1.0 if weapon.definition.mechanical_loading else inputs.get("personnel_load_multiplier",1.0)
-	var duration := weapon.definition.preparation_seconds*module*personnel
+	var duration := weapon.loading_seconds()*module*personnel
 	if duration <= 0 or not is_finite(duration): return
 	fire.loading_progress = minf(1,fire.loading_progress+delta/duration)
 	if fire.loading_progress >= 1.0-TIME_EPSILON:
@@ -128,4 +139,4 @@ func _advance_loading(weapon: RuntimeWeaponInstance, delta: float, inputs: Dicti
 		fire.loading = false
 		var stock := 0
 		for ammo: AmmoDefinition in weapon.definition.ammo_definitions: stock += int(weapon.inventory.get(ammo.ammo_id,0))
-		weapon.pending_rounds = mini(weapon.definition.capacity,stock)
+		weapon.pending_rounds = mini(weapon.pending_capacity(),stock)

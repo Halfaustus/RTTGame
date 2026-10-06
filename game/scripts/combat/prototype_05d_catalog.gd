@@ -14,7 +14,9 @@ var default_inventory: Dictionary = {"pdw":{"pdw":150},"rifle":{"standard":150},
 static var _shared: Prototype05DCatalog
 
 static func shared() -> Prototype05DCatalog:
-	if _shared == null: _shared = Prototype05DCatalog.new()
+	if _shared == null:
+		_shared = Prototype05DCatalog.new()
+		_shared.use_confirmed_performance()
 	return _shared
 
 func _init() -> void:
@@ -66,6 +68,28 @@ func _init() -> void:
 		if value.definition_id in ["pdw","rifle","lmg","vehicle_mg"]: value.temporary_fields.append("ammo.test_curve_shape")
 		if value.definition_id.begins_with("cannon_"): value.temporary_fields.append("ammo.explosion_radius_m")
 	Prototype05FConfig.configure(weapons)
+	# Legacy isolated regression fixtures: operator choices are TEST ONLY.
+	for value: WeaponDefinition in weapons.values():
+		value.required_operators = 1
+		value.squad_weapon = value.definition_id in ["lmg","recoilless","shotgun"]
+		value.preparation_cadence = value.definition_id in ["recoilless","rocket"]
+		value.data_source = "test_only:legacy_05d"
+
+func use_confirmed_performance() -> void:
+	var data := ConfirmedGameData.new()
+	var models := {"pdw":"W_MP7","rifle":"W_M4A1","lmg":"W_M249","vehicle_mg":"W_M249V","recoilless":"W_CG","rocket":"W_AT4","shotgun":"W_SHOTGUN","cannon_a":"W_MK44","cannon_b":"W_M242","cannon_c":"W_M242"}
+	for alias: String in models:
+		# Formal performance with missing fields preserved. No legacy fill-in.
+		weapons[alias] = data.weapon(models[alias])
+	default_inventory.clear()
+	ammunition.clear()
+	for alias: String in models:
+		var stock := {}
+		for ammo: AmmoDefinition in weapons[alias].ammo_definitions:
+			ammunition[ammo.ammo_id] = ammo
+			var count := data.number(data.record("Ammo",ammo.ammo_id),"Initial_Inventory_rounds")
+			if is_finite(count): stock[ammo.ammo_id] = int(count)
+		default_inventory[alias] = stock
 
 func _ammo(id: String, kind: String, damage: float, upper: float, distance: float, penetration: float, module: float = 0, radius: float = -1, suppression: float = 0) -> void:
 	var value := AmmoDefinition.new()
@@ -105,6 +129,7 @@ func _gun(id: String, distance: float, capacity: int, ammo: String) -> void:
 	value.preparation_seconds = 3
 
 func allocate(definition: UnitDefinition, weapon_id: String, kind: int, node_id: String, slot_id: String, inventory: Dictionary, primary: bool = false) -> void:
+	if definition.configuration_source == "unconfigured": definition.configuration_source = "test_only:05d_allocation"
 	var value := WeaponAllocation.new()
 	value.definition = weapons[weapon_id]
 	value.node_kind = kind
@@ -115,12 +140,14 @@ func allocate(definition: UnitDefinition, weapon_id: String, kind: int, node_id:
 	value.initial_pending = 0 # Runtime applies the user-confirmed full-first-magazine rule.
 	value.direction_primary = primary
 	value.orientation_priority = 0 if weapon_id.begins_with("cannon_") else 1
+	value.retention_priority = 0 if weapon_id in ["recoilless","lmg"] else 1 # Existing test unit configuration only.
 	value.occupied_slots.assign(["primary","secondary"] if weapon_id == "recoilless" else [slot_id])
 	definition.weapon_allocations.append(value)
 
 func squad(assault: bool) -> UnitDefinition:
 	var value := UnitDefinition.new()
-	value.resource_name = "motorized_assault" if assault else "motorized_defense"
+	value.resource_name = "test_only_motorized_assault" if assault else "test_only_motorized_defense"
+	value.configuration_source = "test_only:05d_squad"
 	value.member_count = 8
 	value.maximum_health = 40
 	value.hardened_speed = 5
@@ -131,13 +158,15 @@ func squad(assault: bool) -> UnitDefinition:
 	value.ability_tags.assign(["sprint","smoke_1"])
 	for id: int in range(1,9):
 		if id <= 2:
-			allocate(value,"recoilless" if assault else "lmg",WeaponAllocation.NodeKind.SOLDIER,str(id),"primary",{"recoilless_ap":4,"recoilless_he":4} if assault else {"standard":750},true)
-		else: allocate(value,"rifle",WeaponAllocation.NodeKind.SOLDIER,str(id),"primary",{"standard":150},true)
+			var model := "recoilless" if assault else "lmg"
+			var stock: Dictionary = default_inventory.get(model,{"recoilless_ap":4,"recoilless_he":4})
+			allocate(value,model,WeaponAllocation.NodeKind.SOLDIER,str(id),"primary",stock,true)
+		else: allocate(value,"rifle",WeaponAllocation.NodeKind.SOLDIER,str(id),"primary",default_inventory.rifle,true)
 	if not assault:
 		var stock := WeaponAllocation.new()
 		stock.definition = weapons.rocket
 		stock.node_kind = WeaponAllocation.NodeKind.UNASSIGNED_SQUAD_STOCK
-		stock.initial_inventory = {"rocket_ap":5}
+		stock.initial_inventory = {"rocket_ap":5} if weapons.rocket.data_source.begins_with("test_only:") else {}
 		value.weapon_allocations.append(stock)
 	return value
 

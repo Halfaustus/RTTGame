@@ -15,6 +15,8 @@ extends Resource
 @export var textures: Dictionary = {}
 @export var identification_size := Vector2(24,24)
 @export var player_colors: Dictionary = {0:Color(0.9,0.25,0.2),1:Color(0.2,0.6,1),2:Color(0.3,0.85,0.4)}
+@export var own_player_color := Color(0.2,0.6,1)
+@export var other_player_color := Color(0.3,0.85,0.4)
 
 func symbol_for(kind: int, armed: bool = true) -> String:
 	return symbols.get(key_for(kind,armed),"?")
@@ -22,5 +24,7 @@ func key_for(kind: int, armed: bool) -> String:
 	return "armored_vehicle" if kind == UnitDefinition.UnitType.ARMORED_VEHICLE else ("infantry" if armed else "unarmed")
 func texture_for(kind: int, armed: bool = true) -> Texture2D:
 	return textures.get(key_for(kind,armed))
-func color_for(player: int) -> Color:
+func color_for(player: int,viewer: int = -1) -> Color:
+	if viewer >= 0 and player > 0:
+		return own_player_color if player == viewer else other_player_color
 	return player_colors.get(player,Color.WHITE)

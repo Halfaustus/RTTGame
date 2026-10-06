@@ -23,6 +23,10 @@ var dynamic_retry_seconds := 1.0
 var _map_definition: PrototypeMapDefinition
 var profile: Dictionary = {}
 var attack_facing_requests: Dictionary = {}
+var sampling_failure_reason := ""
+var _sampled_mode := false
+var _sampled_halted := false
+var _sampled_end := NAN
 
 
 func navigation_for(state: UnitState, dynamic: bool = true, minimum_width: float = 0.0) -> StaticNavigationGrid:
@@ -257,6 +261,40 @@ func move_paths(unit_ids: Array[int]) -> Array[PackedVector3Array]:
 
 
 func advance(delta: float) -> Dictionary[int, Vector3]:
+	if _sampled_mode:
+		if not _sampled_halted: sampling_failure_reason = "sampled_movement_active"
+		return {} # Do not advance the same authority via two timing writers.
+	return _advance(delta)
+
+
+# Optional server-only fixed-step adapter. Existing callers keep advance().
+# It samples real post-follow hitboxes, never estimates them from anchor speed.
+func advance_sampled(start: float) -> Dictionary:
+	if _sampled_halted: return {"changed":{},"motion":null,"velocities":{},"reason":sampling_failure_reason}
+	if not is_finite(start) or start < 0.0 or (is_finite(_sampled_end) and absf(start-_sampled_end) > ProjectileUnitMotion.TIME_TOLERANCE):
+		sampling_failure_reason = "movement_sample_clock_mismatch"
+		return {"changed":{},"motion":null,"velocities":{},"reason":sampling_failure_reason}
+	_sampled_mode = true
+	var before := ProjectileUnitMotion.capture(_units)
+	var anchors := {}
+	for unit: UnitState in _units.values(): anchors[unit.unit_id] = unit.position
+	var changed := _advance(GravityBallistics.STEP_SECONDS)
+	var after := ProjectileUnitMotion.capture(_units)
+	var velocities := {}
+	for unit: UnitState in _units.values():
+		velocities[unit.unit_id] = (unit.position-anchors[unit.unit_id])/GravityBallistics.STEP_SECONDS
+		# Following can move the hitbox center while its anchor is parked.
+		if before.has(unit.unit_id) and after.has(unit.unit_id) and velocities[unit.unit_id] == Vector3.ZERO:
+			velocities[unit.unit_id] = (after[unit.unit_id].center-before[unit.unit_id].center)/GravityBallistics.STEP_SECONDS
+	var motion := ProjectileUnitMotion.new()
+	var ready := motion.configure(start,before,after)
+	sampling_failure_reason = "" if ready else motion.failure_reason
+	_sampled_end = start+GravityBallistics.STEP_SECONDS
+	_sampled_halted = not ready # Movement already occurred; never replay it on retry.
+	return {"changed":changed,"motion":motion,"velocities":velocities,"reason":sampling_failure_reason}
+
+
+func _advance(delta: float) -> Dictionary[int, Vector3]:
 	var changed: Dictionary[int, Vector3] = {}
 	for id: int in attack_facing_requests:
 		if _units.has(id) and not _targets.has(id):
@@ -388,6 +426,12 @@ func has_active_moves() -> bool:
 
 func is_moving(unit_id: int) -> bool:
 	return _targets.has(unit_id) and not _engaging.has(unit_id)
+
+func matches_units(units: Dictionary) -> bool:
+	if _units.size() != units.size(): return false
+	for id: Variant in units:
+		if _units.get(id) != units[id]: return false
+	return true
 
 
 func update_attack_engagement(combat: CombatSimulation) -> void:

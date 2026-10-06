@@ -4,6 +4,8 @@ signal rotation_started
 
 @export var config: CameraConfig = preload("res://data/prototype_camera.tres")
 
+@export var battlefield_config: MovementConfig
+
 var _center: Vector3
 var _yaw: float
 var _pitch: float
@@ -43,7 +45,10 @@ func is_rotating() -> bool:
 
 
 func _gui_blocked() -> bool:
-	return get_viewport().gui_get_focus_owner() != null or get_viewport().gui_get_hovered_control() != null
+	# Captured rotation must not be cancelled by a stale hover under its fixed cursor.
+	if _rotating: return false
+	var hovered := get_viewport().gui_get_hovered_control()
+	return get_viewport().gui_get_focus_owner() != null or (hovered != null and not hovered is UnitMarker)
 
 
 func _input(event: InputEvent) -> void:
@@ -56,6 +61,9 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
 		_middle_held = false
 		_end_rotation_if_released()
+	# Camera rotation owns these events before markers/GUI can consume them.
+	if (event is InputEventKey and event.keycode == KEY_ALT) or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE) or (event is InputEventMouseMotion and _rotating):
+		_handle_camera_input(event)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -117,6 +125,7 @@ func _begin_rotation() -> void:
 		return
 	_rotating = true
 	_saved_mouse_mode = Input.mouse_mode
+	if _saved_mouse_mode == Input.MOUSE_MODE_CAPTURED: _saved_mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_saved_mouse_position = get_viewport().get_mouse_position()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	rotation_started.emit()
@@ -155,10 +164,10 @@ func _advance_pan(delta: float) -> void:
 	if axis.is_zero_approx():
 		return
 	axis = axis.normalized()
-	# Use yaw alone: neither pitch nor zoom changes ground movement speed.
+	# Ground axes use yaw; optional activity speed scales with height.
 	var right := Vector3(cos(_yaw), 0, -sin(_yaw))
 	var backward := Vector3(sin(_yaw), 0, cos(_yaw))
-	_center += (right * axis.x + backward * axis.y) * config.movement_speed * delta
+	_center += (right * axis.x + backward * axis.y) * pan_speed() * delta
 	_apply_view()
 
 
@@ -169,10 +178,22 @@ func _rotate_pixels(pixels: Vector2) -> void:
 
 
 func _zoom(steps: float) -> void:
-	_distance = clampf(_distance + steps * config.zoom_step, config.minimum_distance, config.maximum_distance)
+	_distance = clampf(_distance + steps * maxf(config.zoom_step,_distance*config.zoom_distance_fraction), config.minimum_distance, config.maximum_distance)
 	_apply_view()
 
 
 func _apply_view() -> void:
+	if battlefield_config != null:
+		_center.x = clampf(_center.x, battlefield_config.minimum_xz.x, battlefield_config.maximum_xz.x)
+		_center.z = clampf(_center.z, battlefield_config.minimum_xz.y, battlefield_config.maximum_xz.y)
+		_center.y = battlefield_config.ground_height
 	global_rotation = Vector3(-_pitch, _yaw, 0)
 	global_position = _center + Vector3(sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
+
+func pan_speed() -> float:
+	if not config.height_scaled_pan: return config.movement_speed
+	var minimum_height := config.minimum_distance*sin(deg_to_rad(config.minimum_pitch_degrees))
+	var maximum_height := config.maximum_distance*sin(deg_to_rad(config.maximum_pitch_degrees))
+	var height := _distance*sin(_pitch)
+	var fraction := clampf(inverse_lerp(minimum_height,maximum_height,height),0,1)
+	return lerpf(config.movement_speed,config.maximum_pan_speed,fraction)

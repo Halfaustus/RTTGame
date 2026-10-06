@@ -39,6 +39,8 @@ var runtime_weapons: Array[RuntimeWeaponInstance] = []
 var unassigned_inventory: Dictionary = {}
 var _formation_members: Array[int] = []
 var profile: Dictionary = {}
+var squad_channels: SquadWeaponChannels
+var armament_configuration_reason := "eligible"
 var member_health: PackedFloat32Array:
 	get:
 		var result := PackedFloat32Array()
@@ -49,12 +51,14 @@ var member_offsets: PackedVector3Array:
 
 
 func configure(team: int, unit_definition: UnitDefinition) -> void:
+	if squad_channels != null: squad_channels.detach()
 	definition = unit_definition
 	team_id = team
 	members.clear()
 	mounts.clear()
 	runtime_slots.clear()
 	runtime_weapons.clear()
+	squad_channels = null
 	unassigned_inventory.clear()
 	hull_weapon_slots.clear()
 	_formation_members.clear()
@@ -84,6 +88,8 @@ func configure(team: int, unit_definition: UnitDefinition) -> void:
 
 
 func _initialize_weapons() -> void:
+	armament_configuration_reason = "eligible" if definition.weapon_allocations_valid() else "invalid_weapon_allocations"
+	if armament_configuration_reason != "eligible": return
 	# Existing explicitly configured slots also use the same runtime representation.
 	for slot_definition: WeaponSlotDefinition in hull_weapon_slots:
 		if slot_definition.weapon != null: _attach_weapon(slot_definition,WeaponAllocation.NodeKind.HULL,"hull",self)
@@ -95,13 +101,10 @@ func _initialize_weapons() -> void:
 			for ammo_id: String in allocation.initial_inventory:
 				unassigned_inventory[ammo_id] = unassigned_inventory.get(ammo_id,0) + allocation.initial_inventory[ammo_id]
 			continue
+		if allocation.node_kind == WeaponAllocation.NodeKind.SOLDIER: continue # Built once by the channel factory.
 		var spatial: RefCounted = self
 		var identifier := "hull"
-		if allocation.node_kind == WeaponAllocation.NodeKind.SOLDIER:
-			if allocation.member_id < 1 or allocation.member_id > members.size(): continue
-			spatial = members[allocation.member_id-1]
-			identifier = str(allocation.member_id)
-		elif allocation.node_kind == WeaponAllocation.NodeKind.MOUNT:
+		if allocation.node_kind == WeaponAllocation.NodeKind.MOUNT:
 			spatial = null
 			for mount: WeaponMountState in mounts:
 				if mount.mount_id == allocation.mount_id: spatial = mount
@@ -118,6 +121,11 @@ func _initialize_weapons() -> void:
 		if spatial is SoldierState: spatial.weapon_slots.append(slot_definition)
 		elif spatial is WeaponMountState: spatial.weapon_slots.append(slot_definition)
 		else: hull_weapon_slots.append(slot_definition)
+	if unit_type() == UnitDefinition.UnitType.INFANTRY and definition.weapon_allocations_valid():
+		squad_channels = SquadWeaponChannels.new(self)
+
+func refresh_weapon_operators() -> void:
+	if squad_channels != null: squad_channels.refresh()
 
 func _attach_weapon(slot_definition: WeaponSlotDefinition, kind: int, identifier: String, spatial: RefCounted) -> RuntimeWeaponInstance:
 	var slot_state := WeaponSlotState.new(slot_definition,kind,identifier)
@@ -243,11 +251,13 @@ func synchronize_legacy_members() -> void:
 	_reassign_formation()
 
 
-func armor_direction(source: Vector3) -> String:
+func armor_direction(source: Vector3,at_position: Vector3 = Vector3(NAN,NAN,NAN),at_yaw: float = NAN) -> String:
+	if not at_position.is_finite(): at_position = position
+	if not is_finite(at_yaw): at_yaw = yaw
 	if not source.is_finite() or not is_finite(yaw): return "unknown"
-	var incoming := Vector2(source.x - position.x, source.z - position.z)
+	var incoming := Vector2(source.x - at_position.x, source.z - at_position.z)
 	if incoming.is_zero_approx(): return "unknown"
-	var forward := Vector2(-sin(yaw), -cos(yaw))
+	var forward := Vector2(-sin(at_yaw), -cos(at_yaw))
 	var angle := absf(forward.angle_to(incoming))
 	if angle <= deg_to_rad(60.0) + 0.000001: return "front"
 	if angle >= deg_to_rad(135.0) - 0.000001: return "rear"
@@ -265,7 +275,7 @@ func weapon_summary() -> Array[Dictionary]:
 	for instance: RuntimeWeaponInstance in runtime_weapons:
 		var id := instance.definition.definition_id
 		if not grouped.has(id): grouped[id] = {"definition_id":id,"count":0,"ammunition":{}}
-		grouped[id].count += 1
+		grouped[id].count += instance.configured_count
 		for ammo_id: String in instance.inventory:
 			grouped[id].ammunition[ammo_id] = grouped[id].ammunition.get(ammo_id,0)+instance.inventory[ammo_id]
 	var result: Array[Dictionary] = []

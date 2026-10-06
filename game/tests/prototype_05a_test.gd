@@ -103,7 +103,7 @@ func run() -> void:
 	var squad: UnitDefinition = INFANTRY.duplicate(true)
 	squad.member_count = 8
 	squad.maximum_health = 40
-	check(unit(6,Vector3.ZERO,squad).member_health.size() == 8,"formal squad count configurable")
+	check(unit(6,Vector3.ZERO,squad).member_health.size() == 8,"TEST ONLY squad count configurable, not formal N")
 	squad.member_count = 6
 	squad.maximum_health = 30
 	check(squad.spatial_valid() and unit(7,Vector3.ZERO,squad).member_health.size() == 6,"mechanized squad structure configurable")
@@ -122,11 +122,11 @@ func run() -> void:
 	spawned_model._peer_players[42] = 1
 	var purchase: Dictionary = spawned_model.deployment.buy_order(1,"test.rifle","ground.west")
 	check(purchase.ok and spawned_model.deployment.place_order(1,purchase.order_id,Vector3(10,0,110)).ok,"deployment request retained")
-	for tick: int in 180: spawned_model._run_server_tick(PackedInt32Array([42]))
+	for tick: int in 3*spawned_model.timeline.tick_hz: spawned_model._run_server_tick(PackedInt32Array([42]))
 	var row: Dictionary = spawned_model.deployment._orders[purchase.order_id]
 	check(row.status == "generated","production spawning")
 	var generated: UnitState = spawned_model._authoritative_units[row.unit_id]
-	check(generated.member_health.size() == INFANTRY.member_count and generated.intersects_hit_segment(generated.position-Vector3.RIGHT,generated.position+Vector3.RIGHT),"deployment initializes squad and hitbox")
+	check(generated.member_health.size() == generated.definition.member_count and generated.intersects_hit_segment(generated.position-Vector3.RIGHT,generated.position+Vector3.RIGHT),"deployment initializes squad and hitbox")
 	check(generated.owner_player_id == 1 and generated.owner_peer_id == 42,"match and connection identity preserved")
 	spawned_model.timeline.begin_tick()
 	spawned_model.timeline.enter_phase("session")
@@ -134,7 +134,7 @@ func run() -> void:
 	var free_found := false
 	for state: UnitState in spawned_model._authoritative_units.values():
 		if state.owner_peer_id == 77 and state.unit_type() == UnitDefinition.UnitType.INFANTRY:
-			free_found = state.member_health.size() == INFANTRY.member_count
+			free_found = state.member_health.size() == state.definition.member_count and state.definition.configuration_source.begins_with("test_only:")
 	check(free_found,"free spawning initializes same squad structure")
 	spawned_model.free()
 	print("0.5A checks=",checks," failures=",failures)

@@ -1,0 +1,28 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/game_world.gd" id="1_world"]
+[ext_resource type="Script" path="res://scripts/maps/test_map_geometry.gd" id="2_map"]
+[ext_resource type="Script" path="res://scripts/core/local_camera.gd" id="3_camera"]
+
+[ext_resource type="Resource" path="res://data/db33_active_test_movement.tres" id="4_movement"]
+
+[ext_resource type="Resource" path="res://data/db37_active_test_camera.tres" id="5_camera_config"]
+
+[node name="GameWorld" type="Node3D" unique_id=1229385123]
+script = ExtResource("1_world")
+movement_config = ExtResource("4_movement")
+
+[node name="StaticMap" type="Node3D" parent="."]
+script = ExtResource("2_map")
+movement_config = ExtResource("4_movement")
+
+[node name="Units" type="Node3D" parent="." unique_id=1038493142]
+
+[node name="Camera3D" type="Camera3D" parent="Units" unique_id=1246318135]
+transform = Transform3D(1, 0, 0, 0, 0.70710677, 0.70710677, 0, -0.70710677, 0.70710677, 0, 10, 110)
+script = ExtResource("3_camera")
+battlefield_config = ExtResource("4_movement")
+config = ExtResource("5_camera_config")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="Units/Camera3D" unique_id=1530215971]
+transform = Transform3D(0.8660254, 0.43301272, -0.24999999, 0, 0.49999997, 0.86602545, 0.5, -0.75, 0.43301266, 0, 0, 0)
