@@ -1,4 +1,4 @@
-# RTTGame Development Instructions
+# GreyLine Taskforce Development Instructions
 
 ## Document responsibilities and priority
 
@@ -33,7 +33,9 @@ Keep the checklist body separate; do not merge it into the baseline, HANDOFF or 
 
 ## Project
 
-RTTGame is a real-time tactics game built with Godot 4.7.2.
+GreyLine Taskforce / 灰线战术群 (internal codename: GREYLINE / 灰线; historical repository identifier: RTTGame) is a real-time tactics game built with Godot 4.7.2.
+
+Project naming is maintained in docs/PROJECT_NAMING.md. Branding does not authorize renaming compatibility-sensitive identifiers or changing gameplay.
 
 Primary language: GDScript.
 

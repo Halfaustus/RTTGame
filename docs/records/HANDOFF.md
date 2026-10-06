@@ -1,4 +1,6 @@
-# RTTGame 当前交接
+# GreyLine Taskforce / 灰线战术群 当前交接
+
+正式名称已由用户确定为 GreyLine Taskforce / 灰线战术群，内部代号 GREYLINE / 灰线。Godot 项目显示名采用 GreyLine Taskforce；仓库地址、资源 UID、DATA 与规则标识及回放契约保留。命名约定见[PROJECT_NAMING.md](../PROJECT_NAMING.md)。此次品牌更新不改变以下阶段授权与验收状态。
 
 ## 当前状态与授权
 

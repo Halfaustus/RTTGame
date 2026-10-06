@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="New Game Project"
+config/name="GreyLine Taskforce"
 run/main_scene="uid://dpl2hs3vy4tbg"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"

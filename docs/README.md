@@ -1,4 +1,6 @@
-# RTTGame 文档入口
+# GreyLine Taskforce / 灰线战术群 文档入口
+
+内部代号：GREYLINE / 灰线。正式名称与历史工程标识的边界见[项目命名约定](PROJECT_NAMING.md)；本地同步见[Codex 提示词](LOCAL_CODEX_NAMING_PROMPT.md)。
 
 从[设计基线](constraints/DESIGN_BASELINE.md)、[当前交接](records/HANDOFF.md)与[开发规划](DEVELOPMENT_ROADMAP.md)进入。基线标识DB-2026-10-06-40，所属正文按领域拆分。根目录[AGENTS.md](../AGENTS.md)负责开发流程与实现约束。
 
