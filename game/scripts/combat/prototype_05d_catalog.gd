@@ -84,12 +84,9 @@ func use_confirmed_performance() -> void:
 	default_inventory.clear()
 	ammunition.clear()
 	for alias: String in models:
-		var stock := {}
 		for ammo: AmmoDefinition in weapons[alias].ammo_definitions:
 			ammunition[ammo.ammo_id] = ammo
-			var count := data.number(data.record("Ammo",ammo.ammo_id),"Initial_Inventory_rounds")
-			if is_finite(count): stock[ammo.ammo_id] = int(count)
-		default_inventory[alias] = stock
+		default_inventory[alias] = data.initial_inventory_for_weapon(models[alias]).inventory
 
 func _ammo(id: String, kind: String, damage: float, upper: float, distance: float, penetration: float, module: float = 0, radius: float = -1, suppression: float = 0) -> void:
 	var value := AmmoDefinition.new()

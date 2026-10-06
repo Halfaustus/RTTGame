@@ -22,8 +22,10 @@ func submit(unit: UnitState,point: Vector3,count: int,aiming: AimingSimulation,m
 		if distance > weapon.definition.range_m and unit.definition.hardened_speed <= 0 and unit.definition.unhardened_speed <= 0: return "artillery_cannot_approach"
 		var selection := AmmoSelection.ground_selection(weapon)
 		if selection.reason != "eligible": return selection.reason
-		if not is_finite(selection.ammo.initial_speed_mps) or selection.ammo.initial_speed_mps <= 0: return "projectile_configuration_missing"
-		if distance <= weapon.definition.range_m and not GravityBallistics.high(DirectBallistics.muzzle(weapon),point,selection.ammo.initial_speed_mps).valid: return "intercept_unreachable"
+		if not selection.ammo.distance_selected_launch: return "projectile_configuration_missing"
+		if distance <= weapon.definition.range_m:
+			var solution := GravityBallistics.indirect(DirectBallistics.muzzle(weapon),point)
+			if not solution.valid: return solution.reason
 		eligible.append(weapon)
 	if eligible.is_empty(): return "no_artillery_weapon"
 	movement.request_stop([unit.unit_id],unit.owner_peer_id)

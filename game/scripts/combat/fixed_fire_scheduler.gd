@@ -68,6 +68,7 @@ static func _eligibility(weapon: RuntimeWeaponInstance,aiming: AimingSimulation,
 	if frame == null and (aiming.moving.call(weapon.owner_state().unit_id) or aiming.target_velocities.get(weapon.owner_state().unit_id,Vector3.ZERO) != Vector3.ZERO or aiming.target_velocities.get(weapon.target.unit_id,Vector3.ZERO) != Vector3.ZERO): return "motion_timeline_not_integrated"
 	var definition := weapon.definition
 	if definition.capacity <= 0 or not is_finite(definition.preparation_seconds) or definition.preparation_seconds <= 0.0 or not is_finite(weapon.shot_interval()) or weapon.shot_interval() < 0.0 or (weapon.shot_interval() == 0.0 and not definition.preparation_cadence): return "fire_configuration_missing"
+	if not definition.cadence_valid(): return "cadence_configuration_invalid"
 	if definition.projectile != null: return "legacy_projectile_configuration"
 	if definition.spread_policy != "fixed_world_radius" or not is_finite(definition.spread_radius_m) or definition.spread_radius_m < 0.0: return "spread_configuration_missing"
 	return "eligible"
@@ -115,7 +116,8 @@ static func _emit(fire: FireSimulation,weapon: RuntimeWeaponInstance,at: float,a
 	state.reason = selection.reason
 	if state.reason != "eligible": return {}
 	var ammo: AmmoDefinition = selection.ammo
-	if not is_finite(ammo.initial_speed_mps) or ammo.initial_speed_mps <= 0.0:
+	var indirect := aiming.artillery_tasks.has(weapon.instance_id)
+	if (indirect and not ammo.distance_selected_launch) or (not indirect and (ammo.distance_selected_launch or not is_finite(ammo.initial_speed_mps) or ammo.initial_speed_mps <= 0.0)):
 		state.reason = "projectile_configuration_missing"
 		return {}
 	var inputs: Dictionary = aiming.inputs.get(weapon.owner_state().unit_id,{})
@@ -143,11 +145,11 @@ static func _emit(fire: FireSimulation,weapon: RuntimeWeaponInstance,at: float,a
 		return {}
 	var spread := DirectBallistics.spread_offset(fire.random,radius,offset.normalized())
 	fire.profile["spread_samples"] = fire.profile.get("spread_samples",0)+1
-	var solution := GravityBallistics.high(origin,target,ammo.initial_speed_mps,spread) if aiming.artillery_tasks.has(weapon.instance_id) else GravityBallistics.direct(origin,target,sample.get("target_velocity",Vector3.ZERO),ammo.initial_speed_mps,spread)
+	var solution := GravityBallistics.indirect(origin,target,spread) if indirect else GravityBallistics.direct(origin,target,sample.get("target_velocity",Vector3.ZERO),ammo.initial_speed_mps,spread)
 	if not solution.has("solves"): solution.solves = 1
 	fire.profile["ballistic_solves"] = fire.profile.get("ballistic_solves",0)+int(solution.solves)
 	if not solution.valid:
-		state.reason = "intercept_unreachable"
+		state.reason = solution.reason if indirect else "intercept_unreachable"
 		if aiming.artillery_tasks.has(weapon.instance_id): aiming.artillery_tasks[weapon.instance_id].finished = true
 		return {}
 	# Automatic gravity/lead/spread compensation is separate from node turning.

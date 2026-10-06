@@ -1,7 +1,10 @@
 {
-"baseline_id": "DB-2026-10-05-29",
+"data_schema_version": 1,
+"data_version": "RTT_GAME_DATA-2026-10-06-40",
+"rules_id": "DB-2026-10-06-40",
+"baseline_id": "DB-2026-10-06-40",
 "source": "docs/RTT_GAME_DATA.xlsx",
-"source_sha256": "4E794F4CB3BFAFD4214C3D012EB4EC2044A7CB426EECE6FA3CFBD0B625A70598",
+"source_sha256": "0113889F5046869610F5195D7751A31A76D4417C208BD9019C25D9892D8C9AC0",
 "sheets": {
 "Weapons": [
   {
@@ -474,7 +477,7 @@
     "P0_or_Pc": 8,
     "Range_Anchor_m": "不适用",
     "P_at_R": "不适用",
-    "Projectile_Speed_kmh": 810,
+    "Projectile_Speed_kmh": "不适用",
     "Blast_Radius_m": 8,
     "Suppression": 80,
     "Module_Damage": 0,

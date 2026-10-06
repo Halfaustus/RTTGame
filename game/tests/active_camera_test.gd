@@ -8,6 +8,19 @@ func run() -> void:
 	check(camera.config==preload("res://data/db37_active_test_camera.tres"),"activity opts into independent test camera")
 	check(camera.config.maximum_distance==500 and camera.config.resource_name.begins_with("TEST ONLY"),"higher zoom limit remains test-only")
 	camera._distance=6
+	check(camera.marker_scale() == 1.0,"low zoom keeps full sized markers")
+	camera._distance=120
+	check(absf(camera.marker_scale()-sqrt(0.5)) < 0.0001,"medium zoom gradually reduces marker size")
+	camera._distance=500
+	check(camera.marker_scale() == 0.6,"high zoom keeps readable bounded marker scale")
+	var marker := UnitMarker.new()
+	root.add_child(marker)
+	marker.project(camera,Vector3.ZERO,camera.marker_scale())
+	check(marker.scale == Vector2(0.6,0.6) and (marker.position+marker.style.body_size*marker.scale*0.5).distance_to(camera.unproject_position(Vector3.ZERO)) < 0.001,"scaled drawing and control hit region stay centered on unit")
+	marker.project(camera,Vector3.ZERO)
+	check(marker.scale == Vector2.ONE,"default frozen presentation retains original marker size")
+	marker.free()
+	camera._distance=6
 	camera._pitch=deg_to_rad(20)
 	camera._apply_view()
 	check(absf(camera.pan_speed()-18)<0.0001,"lowest altitude retains fine 18m/s control")
@@ -60,6 +73,7 @@ func run() -> void:
 	legacy.set_process(false)
 	check(legacy.config==preload("res://data/prototype_camera.tres") and not legacy.config.height_scaled_pan,"old scene retains old camera resource")
 	legacy._distance=60
+	check(legacy.marker_scale() == 1.0,"legacy camera does not opt into marker scaling")
 	legacy._pitch=deg_to_rad(80)
 	check(legacy.pan_speed()==18,"legacy speed remains independent of pitch/zoom")
 	legacy._zoom(-1)

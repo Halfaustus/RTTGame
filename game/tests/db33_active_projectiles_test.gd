@@ -92,7 +92,8 @@ func run() -> void:
 	check(result.emissions.size() == 1,"T produces one authorized mortar projectile: "+test.weapon.fire_state.reason)
 	if not result.emissions.is_empty():
 		var shot: Dictionary = result.emissions[0]
-		check(shot.velocity.y > 200 and absf(shot.velocity.length()-225) < 0.001,"formal 225m/s mortar uses high branch")
+		var planned := GravityBallistics.indirect(shot.position,test.weapon.target.position())
+		check(shot.velocity.y > 0 and absf(shot.velocity.length()-planned.velocity.length()) < 0.1 and planned.seconds <= 20,"mortar selects speed from distance on high branch")
 		artillery.after_emissions(result.emissions,test.aiming.units)
 		check(artillery.tasks.is_empty() and test.weapon.target == null,"one-shot T task completes after exact count")
 		check(test.timeline.projectiles.active_slots.size() == 1,"task completion retains in-flight shell")
@@ -102,7 +103,7 @@ func run() -> void:
 	flight.configure_bounds(Rect2(-1000,-1000,2000,2000))
 	flight.collision.box("test_only:ground","terrain",Vector3(1000,0.05,1000),Transform3D(Basis.IDENTITY,Vector3(0,-0.05,0)))
 	var mortar_ammo := data.ammunition("A_M252_HE")
-	var solution := GravityBallistics.high(Vector3(0,0.5,0),Vector3(0,0,-150),mortar_ammo.initial_speed_mps)
+	var solution := GravityBallistics.indirect(Vector3(0,0.5,0),Vector3(0,0,-150))
 	var shot_batch: Array[Dictionary] = [{"event_id":"test_only:long_mortar","emission_order":1,"time_seconds":0.0,"position":Vector3(0,0.5,0),"velocity":solution.velocity,"ammo":mortar_ammo,"unit_id":1,"owner_player_id":42,"weapon_instance_id":"test_only:mortar"}]
 	flight.step(shot_batch)
 	var ground_hit := {}
@@ -111,7 +112,7 @@ func run() -> void:
 		for row: Dictionary in rows:
 			if row.reason == "impact": ground_hit = row
 		if not ground_hit.is_empty(): break
-	check(not ground_hit.is_empty() and ground_hit.time_seconds > 40 and ground_hit.object_id == "test_only:ground","high mortar remains alive beyond old lifetime and hits actual ground")
+	check(not ground_hit.is_empty() and ground_hit.time_seconds > 5 and ground_hit.time_seconds <= 20 and ground_hit.object_id == "test_only:ground","distance-selected mortar hits actual ground without forced lifetime")
 	check(flight.active_slots.is_empty() and not flight.halted,"long high flight completes through ordinary point consumer")
 	flight.collision.close()
 	var network = load("res://scripts/networking/network_manager.gd").new()
@@ -157,7 +158,7 @@ func run() -> void:
 	accepted = network._execute_command({"type":"artillery","unit_ids":[8001],"target":Vector3(20,0,-50),"count":1,"peer_id":42,"player_id":1})
 	check(accepted.unit_ids == [8001],"authenticated T request reaches activity task system")
 	for i in range(5): network._run_server_tick(PackedInt32Array())
-	check(emissions.any(func(row): return row.unit_id == 8001 and row.velocity.y > 200),"active T task fires formal mortar high trajectory")
+	check(emissions.any(func(row): return row.unit_id == 8001 and row.velocity.y > Vector2(row.velocity.x,row.velocity.z).length()),"active T task fires distance-selected high trajectory")
 	check(network._artillery.tasks.is_empty() and cannon.runtime_weapons[0].target == null,"active T count completion clears task only")
 	rejected = network._execute_command({"type":"ground_fire","unit_ids":[8001],"target":Vector3(20,0,-50),"peer_id":42,"player_id":1})
 	check(rejected.unit_ids.is_empty() and rejected.rejection == "artillery_requires_t","G request cannot silently authorize T-only mortar")

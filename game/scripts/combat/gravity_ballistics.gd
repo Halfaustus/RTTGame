@@ -7,6 +7,27 @@ const STEP_SECONDS := 1.0 / 30.0
 const STEP_VELOCITY := GRAVITY * STEP_SECONDS
 const STEP_DISPLACEMENT := GRAVITY * (0.5 * STEP_SECONDS * STEP_SECONDS)
 
+# 0.5G launch policy, not ammunition DATA or a projectile lifetime.
+# >1 selects the longer-time branch; 1.04 leaves margin below 20s at 1800m.
+const INDIRECT_HIGH_TIME_FACTOR := 1.04
+const INDIRECT_MAX_FLIGHT_SECONDS := 20.0
+
+static func indirect(origin: Vector3, target: Vector3, spread: Vector3 = Vector3.ZERO) -> Dictionary:
+	if not origin.is_finite() or not target.is_finite() or not spread.is_finite():
+		return _failure("invalid_initial_conditions", 1)
+	var point := target + spread
+	var offset := point - origin
+	# |v(t)|² = |offset|²/t² + g*H + g²*t²/4.
+	# Its minimum occurs at t²=2*|offset|/g; larger t is the high branch.
+	var seconds := INDIRECT_HIGH_TIME_FACTOR * sqrt(2.0 * offset.length() / -GRAVITY.y)
+	if not is_finite(seconds) or seconds <= 0.0:
+		return _failure("no_positive_flight_time", 1)
+	if seconds > INDIRECT_MAX_FLIGHT_SECONDS:
+		return _failure("indirect_flight_time_exceeded", 1)
+	var velocity := offset / seconds - GRAVITY * (0.5 * seconds)
+	if not velocity.is_finite(): return _failure("invalid_initial_conditions", 1)
+	return {"valid":true,"reason":"eligible","velocity":velocity,"seconds":seconds,"point":point,"solves":1}
+
 # Call at actual emission time. The caller samples spread once and supplies
 # that same world-space offset; this solver never samples or changes it.
 static func direct(origin: Vector3, target: Vector3, target_velocity: Vector3, speed: float, spread: Vector3 = Vector3.ZERO) -> Dictionary:

@@ -44,7 +44,7 @@ func run() -> void:
 		var runtime: RuntimeWeaponInstance = test.weapon
 		var row := data.record("Weapons",id)
 		var expected_interval := data.number(row,"Single_Weapon_Projectile_Interval_s")
-		check(runtime.definition.definition_id == id and runtime.definition.data_source == "DB29:RTT_GAME_DATA.xlsx",id+" actual runtime references DATA weapon")
+		check(runtime.definition.definition_id == id and runtime.definition.data_source == "DB40:RTT_GAME_DATA.xlsx",id+" actual runtime references DATA weapon")
 		check(is_equal_approx(runtime.shot_interval(),expected_interval),id+" interval sourced from DATA exactly once")
 		check(runtime.definition.capacity == int(row.Capacity_rounds),id+" capacity sourced from DATA")
 		check(runtime.definition.preparation_seconds == data.number(row,"Reload_s"),id+" reload sourced from DATA")

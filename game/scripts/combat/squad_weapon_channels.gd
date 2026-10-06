@@ -169,6 +169,10 @@ func _drain(touched: Dictionary) -> void:
 		for count: int in channel.inventory.values(): stock += count
 		channel.pending_rounds = mini(channel.pending_rounds,stock)
 		profile.channel_updates += 1
+		var issues := inventory_issues(channel)
+		if not issues.is_empty():
+			channel.operator_reason = "inventory_accounting_invalid"
+			push_error("Squad inventory invariant: "+str(issues))
 
 func consume(channel: RuntimeWeaponInstance, ammo_id: String, count: int) -> void:
 	# Stable source order is accounting only; one channel commits one shot.
@@ -177,3 +181,48 @@ func consume(channel: RuntimeWeaponInstance, ammo_id: String, count: int) -> voi
 		source.inventory[ammo_id] = int(source.inventory.get(ammo_id,0))-debit
 		count -= debit
 		if count == 0: return
+	if count != 0:
+		channel.operator_reason = "inventory_accounting_invalid"
+		push_error("Source quota cannot cover committed channel debit: "+channel.instance_id)
+
+
+# Stable-boundary invariant, per channel AND per ammo:
+# sum(source.inventory[ammo]) == channel.inventory[ammo].
+# Pending/loaded rounds are INCLUDED in that total; in-flight shots have
+# already been debited. No third stock authority or per-tick ledger scan.
+# During RuntimeWeaponInstance.consume, aggregate debit precedes source debit,
+# and caller updates pending after return: use check_pending=false at that
+# intermediate boundary. Full checks belong after the complete emission.
+func inventory_issues(channel: RuntimeWeaponInstance,check_pending: bool = true) -> Array[Dictionary]:
+	var issues: Array[Dictionary] = []
+	var path := "channels."+channel.instance_id
+	if channels.get(channel.definition.definition_id) != channel or not source_groups.has(channel.instance_id):
+		return [{"path":path,"code":"unknown_channel","message":"Channel is not owned by this ledger"}]
+	var totals := {}
+	for source: Dictionary in source_groups[channel.instance_id]:
+		for ammo_id: Variant in source.inventory:
+			var count: Variant = source.inventory[ammo_id]
+			if not count is int or count < 0:
+				issues.append({"path":path+".sources."+source.id+"."+str(ammo_id),"code":"invalid_source_stock","message":"Source quota must be a nonnegative integer"})
+				continue
+			totals[ammo_id] = totals.get(ammo_id,0)+count
+	var keys := totals.keys()
+	for ammo_id: Variant in channel.inventory:
+		if not keys.has(ammo_id): keys.append(ammo_id)
+	var total := 0
+	for ammo_id: Variant in keys:
+		var count: Variant = channel.inventory.get(ammo_id,0)
+		if not count is int or count < 0:
+			issues.append({"path":path+".inventory."+str(ammo_id),"code":"invalid_channel_stock","message":"Channel stock must be a nonnegative integer"})
+			continue
+		total += count
+		if count != totals.get(ammo_id,0):
+			issues.append({"path":path+".inventory."+str(ammo_id),"code":"inventory_ledger_mismatch","channel_remaining":count,"source_remaining":totals.get(ammo_id,0),"message":"Source quota sum differs from channel total"})
+	if check_pending and (channel.pending_rounds < 0 or channel.pending_rounds > mini(maxi(0,channel.pending_capacity()),total)):
+		issues.append({"path":path+".pending_rounds","code":"pending_outside_stock","message":"Ready count must stay within capacity and total stock, never added to it"})
+	return issues
+
+func all_inventory_issues() -> Array[Dictionary]:
+	var issues: Array[Dictionary] = []
+	for channel: RuntimeWeaponInstance in channels.values(): issues.append_array(inventory_issues(channel))
+	return issues

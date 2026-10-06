@@ -1,11 +1,13 @@
 extends SceneTree
 
 var failures := 0
+var checks := 0
 
 func _initialize() -> void:
 	_run.call_deferred()
 
 func check(condition: bool, label: String) -> void:
+	checks += 1
 	if not condition:
 		failures += 1
 		push_error("FAIL: " + label)
@@ -61,6 +63,17 @@ func _run() -> void:
 		field.release_focus()
 		field.queue_free()
 		world._handle_world_input(key_event(KEY_E))
+	for code: Key in [KEY_G, KEY_T]:
+		world._pending_actions.clear()
+		world._handle_world_input(key_event(code))
+		world._handle_world_input(mouse_event(MOUSE_BUTTON_RIGHT))
+		world._handle_world_input(mouse_event(MOUSE_BUTTON_RIGHT,false))
+		check(world._pending_actions.is_empty() and not world._fire_mode.is_empty(),"right click never confirms fire or sends movement in fire mode")
+		world._handle_world_input(mouse_event(MOUSE_BUTTON_LEFT))
+		world._handle_world_input(mouse_event(MOUSE_BUTTON_LEFT,false))
+		check(world._pending_actions.size() == 1 and world._pending_actions[0].type == ("artillery" if code == KEY_T else "ground_fire"),"left click confirms fire exactly once without selecting through")
+		check(world._fire_mode.is_empty() and not world._left_pressed,"fire confirmation exits interaction")
+	world._pending_actions.clear()
 	world._handle_world_input(key_event(KEY_A))
 	check(not world._attack_move_armed, "old A shortcut inactive")
 	for code: Key in [KEY_Q, KEY_F, KEY_R]:
@@ -79,5 +92,5 @@ func _run() -> void:
 	check(world._visual_units.has(101) and world._visual_units.has(102) and world._visual_units[101].position.x == 3, "old deferred removal cannot erase fresh snapshot visuals")
 	world.queue_free()
 	await process_frame
-	print("Command input isolated checks: ", "PASS" if failures == 0 else "FAIL")
+	print("Command input isolated checks: %d checks, %d failures" % [checks,failures])
 	quit(0 if failures == 0 else 1)

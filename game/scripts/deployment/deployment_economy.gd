@@ -46,7 +46,11 @@ func initialize(config: DeploymentConfig, movement: MovementConfig, map: Prototy
 			return "incomplete catalog entry"
 		if not _stable_id(entry.config_id) or catalog.has(entry.config_id) or not entry.definition is UnitDefinition:
 			return "invalid or duplicate catalog ID/definition"
-		if not entry.definition.spatial_valid(): return "invalid unit spatial configuration"
+		var level := UnitDefinitionValidator.Level.TEST if config.temporary_test_values else UnitDefinitionValidator.Level.COMPLETE
+		var validation := UnitDefinitionValidator.validate_unit_definition(entry.definition,level)
+		if not validation.valid:
+			var issue: Dictionary = validation.errors[0]
+			return "unit definition %s: %s [%s]: %s" % [entry.config_id,issue.path,issue.code,issue.message]
 		if definitions.has(entry.definition.resource_path) or entry.definition.resource_path.is_empty():
 			return "catalog definitions must be unique saved resources"
 		for key: String in ["value_points", "sortie_points"]:

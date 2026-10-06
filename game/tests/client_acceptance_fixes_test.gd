@@ -27,6 +27,7 @@ func run() -> void:
 	model.weapon_fire_received.connect(func(row): emissions.append(row))
 	var accepted: Dictionary = model._execute_command({"type":"ground_fire","unit_ids":[9000],"target":Vector3(20,0,90),"peer_id":42,"player_id":10})
 	check(accepted.unit_ids == [9000],"real G binds finite one-shot budget")
+	check(model._replication_queue.any(func(row): return row.method == "_receive_unit_stops" and row.arguments[0] == [9000]),"accepted G publishes existing stop notification to clear client movement route")
 	for tick in range(90): model._run_server_tick(PackedInt32Array())
 	check(emissions.size() == 2 and emissions[0].weapon_instance_id != emissions[1].weapon_instance_id,"mixed rifle/LMG squad fires each channel once, rather than continuous fire")
 	var count := emissions.size()
@@ -35,6 +36,9 @@ func run() -> void:
 	check(accepted.unit_ids == [9000] and unit.runtime_weapons.all(func(weapon): return weapon.target == null),"accepted movement cancels pending G across channels")
 	for tick in range(30): model._run_server_tick(PackedInt32Array())
 	check(emissions.size() == count,"cancelled G cannot emit during movement")
+	model._replication_queue.clear()
+	model._execute_command({"type":"ground_fire","unit_ids":[9000],"target":Vector3(20,0,90),"peer_id":42,"player_id":10})
+	check(not model._movement.is_moving(9000) and model._replication_queue.any(func(row): return row.method == "_receive_unit_stops"),"fire interrupts actual moving unit and replicates route cancellation")
 	check(not model._projectiles.halted,"one-shot changes leave authoritative flight chain valid")
 	# The rendered mesh, not just a helper, must be short for a 900m/s shot.
 	var feed := PresentationFeed.new()
@@ -63,11 +67,19 @@ func run() -> void:
 	var structure := mortar.structure_snapshot()
 	var before: Dictionary = mortar.runtime_weapons[0].inventory.duplicate()
 	var preview := ArtilleryPreview.new()
+	var direct_structure := unit.structure_snapshot()
+	var direct_point := Vector3(20,0,90)
+	var direct_result := preview.describe(direct_structure.weapons[0],direct_point,false)
+	check(direct_result.valid and direct_result.origin.distance_to(direct_point) > 0,"G nominal direct solution uses private owning weapon snapshot")
+	var direct_end: Vector3 = direct_result.origin+direct_result.velocity*direct_result.seconds+GravityBallistics.GRAVITY*(0.5*direct_result.seconds*direct_result.seconds)
+	check(direct_end.distance_to(direct_point) < 0.001,"G nominal red trajectory reaches selected ground point")
+	var direct_structures: Array[Dictionary] = [direct_structure]
+	check(preview.show_targets(direct_structures,direct_point,false).contains("距离") and preview.mesh.get_surface_count() == 1,"G renders red solid preview with distance")
 	var point := Vector3(0,0,-50)
 	var description := preview.describe(structure.weapons[0],point)
 	check(description.valid and absf(description.distance-structure.weapons[0].weapon_position.distance_to(point)) < 0.0001 and description.minimum == 100 and description.maximum == 1800,"preview uses actual weapon position and formal mortar range")
 	var endpoint: Vector3 = description.origin+description.velocity*description.seconds+GravityBallistics.GRAVITY*(0.5*description.seconds*description.seconds)
-	check(endpoint.distance_to(point) < 0.001 and description.velocity.y > 200,"red trajectory uses nominal high branch ending at chosen point")
+	check(endpoint.distance_to(point) < 0.001 and description.seconds <= 20 and description.velocity.y > Vector2(description.velocity.x,description.velocity.z).length(),"red trajectory uses distance-selected high branch ending at chosen point")
 	var structures: Array[Dictionary] = [structure]
 	var text := preview.show_targets(structures,point)
 	check(text.contains("距离 %.1f 米" % description.distance) and preview.mesh.get_surface_count() == 1 and preview.material_override.albedo_color == Color.RED,"local red solid mesh and metric range text are produced")
@@ -77,6 +89,20 @@ func run() -> void:
 	preview.show_targets(structures,Vector3(0,0,80))
 	check(preview.mesh.get_surface_count() == 0,"invalid range clears valid trajectory")
 	preview.free()
+	# In-memory TEST ONLY short range exercises approach without changing DATA.
+	mortar.runtime_weapons[0].definition = mortar.runtime_weapons[0].definition.duplicate()
+	mortar.runtime_weapons[0].definition.range_m = 120
+	model._authoritative_units[9001] = mortar
+	model._movement.add_unit(mortar)
+	model._combat.add_unit(mortar)
+	model._replication_queue.clear()
+	var approach: Dictionary = model._execute_command({"type":"artillery","unit_ids":[9001],"target":point,"count":1,"peer_id":42,"player_id":10})
+	check(approach.unit_ids == [9001] and model._movement.is_moving(9001),"out-of-range T retains authoritative approach")
+	var movement_messages: Array = model._replication_queue.filter(func(row): return row.method in ["_receive_unit_stops","_receive_move_targets","_receive_move_paths"])
+	check(movement_messages.size() == 3 and movement_messages[0].method == "_receive_unit_stops" and movement_messages[1].method == "_receive_move_targets" and movement_messages[2].method == "_receive_move_paths","approach clears old route before publishing new route in reliable order")
+	model._replication_queue.clear()
+	var rejected: Dictionary = model._execute_command({"type":"artillery","unit_ids":[9001],"target":Vector3(0,0,90),"count":1,"peer_id":42,"player_id":10})
+	check(rejected.unit_ids.is_empty() and model._movement.is_moving(9001) and model._replication_queue.is_empty(),"rejected too-near fire preserves current movement and sends no stop")
 	# Domain viewer identity, independent of connection IDs and total player count.
 	var style := UnitMarkerStyle.new()
 	check(style.color_for(10,10) == style.own_player_color and style.color_for(10,20) == style.other_player_color,"same unit is blue for its owner and green for another viewer")
@@ -98,6 +124,17 @@ func run() -> void:
 	check(world._visual_units[9001].get_node("MeshInstance3D").material_override.albedo_color == style.other_player_color,"another viewer maps the same unit mesh to green")
 	local_network.local_player_id = 10
 	world._refresh_player_colors()
+	world._visual_units[9001].owner_peer_id = world._view_owner_id()
+	var route := PackedVector3Array([mortar.position,Vector3(0,0.5,70)])
+	var route_ids: Array[int] = [9001]
+	var route_targets: Array[Vector3] = [route[1]]
+	var route_paths: Array[PackedVector3Array] = [route]
+	world._on_unit_move_targets_received(route_ids,route_targets)
+	world._on_unit_move_paths_received(route_ids,route_paths)
+	var path: MeshInstance3D = world._movement_paths[9001]
+	var route_stops: Array[Vector3] = [mortar.position]
+	world._on_unit_stops_received(route_ids,route_stops)
+	check(not path.visible and not world._movement_paths.has(9001) and not world._move_targets.has(9001) and not world._route_points.has(9001) and not world._route_progress.has(9001),"existing stop reception immediately hides indicator and clears every route cache")
 	world._selected_units[9001] = world._visual_units[9001]
 	feed.apply_live_structure(structure)
 	var camera = world.get_node("Units/Camera3D")

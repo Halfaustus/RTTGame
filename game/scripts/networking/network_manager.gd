@@ -689,7 +689,16 @@ func _execute_command(command: Dictionary) -> Dictionary:
 					_movement.request_stop([id],sender)
 					for weapon: RuntimeWeaponInstance in unit.runtime_weapons:
 						if weapon.definition.definition_id != "W_M252": weapon.bind_single_ground_target(command.target)
-				if reason.is_empty(): result.unit_ids.append(id)
+				if reason.is_empty():
+					result.unit_ids.append(id)
+					_pending_positions.erase(id)
+					# Clear the former route, then publish any new artillery approach.
+					var stopped_ids: Array[int] = [id]
+					var stopped_positions: Array[Vector3] = [unit.position]
+					_queue_replication("_receive_unit_stops", [stopped_ids, stopped_positions])
+					if _movement.is_moving(id):
+						_queue_replication("_receive_move_targets", [stopped_ids, _movement.move_targets(stopped_ids)], sender)
+						_queue_replication("_receive_move_paths", [stopped_ids, _movement.move_paths(stopped_ids)], sender)
 				else: result.failed_ids.append(id); result.rejection = reason
 	elif command.group:
 		result = _movement.request_group_move(ids, sender, command.target, command.mode, command.facing)

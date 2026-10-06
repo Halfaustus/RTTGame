@@ -72,6 +72,11 @@ func run() -> void:
 		check(absf(profile.bright_length-10.8)<0.00001 and absf(profile.length-21.6)<0.00001,"tracer length independent of %dHz sampling" % rate)
 	check(visual.tracer_profile(1800).bright_length==15 and visual.tracer_profile(1800).length==30,"faster tracer is capped")
 	check(visual.tracer_profile(450).bright_length<visual.tracer_profile(900).bright_length,"speed scaling")
+	for speed in [22.0,31.523,54.771,134.336]:
+		var readable := visual.tracer_profile(speed)
+		check(readable.length > speed*0.024 and readable.half_width == 0.07 and readable.color == Color(1,1,0.6),"low-speed public motion receives longer wider lighter tracer")
+		check(absf(readable.bright_length-maxf(2,speed*0.08))<0.00001 and absf(readable.fade_length-speed*0.06)<0.00001,"low-speed visual windows remain independent of physics tick")
+	check(visual.tracer_profile(900).half_width==ProjectileVisuals.HALF_WIDTH and visual.tracer_profile(900).color==Color(1,0.9,0.2),"fast tracer appearance unchanged")
 	check(ProjectileVisuals.trail_alpha(0,0.5)==1 and ProjectileVisuals.trail_alpha(0.5,0.5)==0.5 and ProjectileVisuals.trail_alpha(1,0.5)==0,"gradient head/middle/tail")
 	var baseline: Array[Dictionary] = []
 	for fps in [30,60,120,144]:

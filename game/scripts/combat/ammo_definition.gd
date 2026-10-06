@@ -2,7 +2,8 @@ class_name AmmoDefinition
 extends Resource
 
 @export var ammo_id: String = ""
-@export var initial_speed_mps: float = NAN # DATA speed converted from km/h; missing remains missing.
+@export var initial_speed_mps: float = NAN # Direct DATA speed only; missing/N.A. stays NaN.
+var distance_selected_launch := false # Adapter provenance from existing Weapon Class; not a DATA field.
 @export var damage_type: String = ""
 @export var nominal_damage: float = -1.0
 @export var penetration_upper: float = -1.0

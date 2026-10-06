@@ -1,6 +1,6 @@
 # RTTGame 文档入口
 
-从[设计基线](constraints/DESIGN_BASELINE.md)、[当前交接](records/HANDOFF.md)与[开发规划](DEVELOPMENT_ROADMAP.md)进入。基线标识DB-2026-10-06-39，所属正文按领域拆分。根目录[AGENTS.md](../AGENTS.md)负责开发流程与实现约束。
+从[设计基线](constraints/DESIGN_BASELINE.md)、[当前交接](records/HANDOFF.md)与[开发规划](DEVELOPMENT_ROADMAP.md)进入。基线标识DB-2026-10-06-40，所属正文按领域拆分。根目录[AGENTS.md](../AGENTS.md)负责开发流程与实现约束。
 
 ## 文档职责
 

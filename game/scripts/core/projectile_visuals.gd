@@ -11,6 +11,12 @@ var tracer_max_length := 15.0
 var tracer_fade_time := 0.012
 var tracer_fade_max_length := 15.0
 var tracer_alpha := 1.0
+# Readability derived only from public motion. No weapon/ammo identity needed.
+var slow_tracer_speed_limit := 200.0
+var slow_tracer_visual_time := 0.08
+var slow_tracer_fade_time := 0.06
+var slow_tracer_min_length := 2.0
+var slow_tracer_half_width := 0.07
 var feed: PresentationFeed
 var _flashes: Array[Dictionary] = []
 
@@ -31,9 +37,15 @@ func setup(source: PresentationFeed) -> void:
 	set_process(not feed.live_projectiles.is_empty())
 
 func tracer_profile(speed: float) -> Dictionary:
-	var bright := clampf(speed*maxf(0,tracer_visual_time),maxf(0,tracer_min_length),maxf(tracer_min_length,tracer_max_length))
-	var fade := clampf(speed*maxf(0,tracer_fade_time),0,maxf(0,tracer_fade_max_length))
-	return {"bright_length":bright,"fade_length":fade,"length":bright+fade}
+	var slow := speed > 0.0 and speed <= slow_tracer_speed_limit
+	var visual_time := slow_tracer_visual_time if slow else tracer_visual_time
+	var fade_time := slow_tracer_fade_time if slow else tracer_fade_time
+	var minimum := slow_tracer_min_length if slow else tracer_min_length
+	var bright := clampf(speed*maxf(0,visual_time),maxf(0,minimum),maxf(minimum,tracer_max_length))
+	var fade := clampf(speed*maxf(0,fade_time),0,maxf(0,tracer_fade_max_length))
+	return {"bright_length":bright,"fade_length":fade,"length":bright+fade,
+		"half_width":slow_tracer_half_width if slow else HALF_WIDTH,
+		"color":Color(1,1,0.6) if slow else Color(1,0.9,0.2)}
 
 func visual_segment(head: Vector3, velocity: Vector3) -> Dictionary:
 	var result := tracer_profile(velocity.length())
@@ -95,8 +107,9 @@ func _draw_segment(segment: Dictionary) -> void:
 		var start: Vector3 = points[index-1]
 		var end: Vector3 = points[index]
 		var distance := start.distance_to(end)
-		var side := (end-start).cross(Vector3.UP).normalized()*HALF_WIDTH
-		if side.is_zero_approx(): side = Vector3.RIGHT*HALF_WIDTH
+		var half_width: float = segment.half_width
+		var side := (end-start).cross(Vector3.UP).normalized()*half_width
+		if side.is_zero_approx(): side = Vector3.RIGHT*half_width
 		for subdivision in range(FADE_SEGMENTS):
 			var a := float(subdivision)/FADE_SEGMENTS
 			var b := float(subdivision+1)/FADE_SEGMENTS
@@ -104,7 +117,9 @@ func _draw_segment(segment: Dictionary) -> void:
 			var pb := start.lerp(end,b)
 			for vertex: Dictionary in [{"point":pa-side,"t":a},{"point":pa+side,"t":a},{"point":pb+side,"t":b},{"point":pa-side,"t":a},{"point":pb+side,"t":b},{"point":pb-side,"t":b}]:
 				var fraction: float = (travelled+distance*vertex.t)/length
-				mesh.surface_set_color(Color(1,0.9,0.2,segment.alpha*trail_alpha(fraction,bright_fraction)))
+				var color: Color = segment.color
+				color.a = segment.alpha*trail_alpha(fraction,bright_fraction)
+				mesh.surface_set_color(color)
 				mesh.surface_add_vertex(vertex.point)
 		travelled += distance
 static func trail_alpha(fraction: float, bright_fraction: float) -> float:

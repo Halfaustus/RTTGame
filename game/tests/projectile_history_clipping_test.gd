@@ -24,6 +24,25 @@ func run() -> void:
 	feed.synchronize_projectile_time(0)
 	visual._process(0)
 	check(visual.mesh.get_surface_count()==0 and visual.is_processing(),"first display at spawn has no backward tail, keeps processing")
+	# Longer low-speed cosmetic profile still clips to sub-metre flight history.
+	feed.reset_received.emit()
+	var short_slow := initial.duplicate(true)
+	short_slow.projectile_id = "flight:99"
+	short_slow.emission_order = 99
+	short_slow.velocity = Vector3(32,0,0)
+	feed.apply_projectile_spawn(short_slow)
+	var short_slow_next := short_slow.duplicate(true)
+	short_slow_next.time_seconds = 0.5/32
+	short_slow_next.position = Vector3(0.5,2,0)
+	feed.apply_projectile_spawn(short_slow_next)
+	feed.synchronize_projectile_time(short_slow_next.time_seconds+feed.interpolation_delay)
+	visual._process(0)
+	check(visual.mesh.get_surface_count()==1,"enhanced low-speed observed history produces visible mesh")
+	if visual.mesh.get_surface_count()==1:
+		check(vertex_x_bounds(visual.mesh).x>=-0.000001,"enhanced low-speed live trail never passes launch")
+	feed.apply_projectile_terminal({"projectile_id":"flight:99","time_seconds":short_slow_next.time_seconds,"position":short_slow_next.position,"reason":"impact"})
+	check(path_length(visual._flashes[-1].points)<=0.500001 and visual._flashes[-1].length>4,"enhanced low-speed terminal clips actual path, not configured length")
+	feed.reset_received.emit()
 	for distance in [0.5,0.75,1.0]:
 		feed.reset_received.emit()
 		feed.apply_projectile_spawn(initial)

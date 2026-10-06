@@ -246,7 +246,7 @@ func _process(_delta: float) -> void:
 		var button: UnitMarker = _markers[order.order_id]
 		button.disabled = owns_commands() or order.status not in ["placed", "countdown", "waiting"]
 		button.mouse_filter = Control.MOUSE_FILTER_IGNORE if owns_commands() else Control.MOUSE_FILTER_STOP
-		button.project(_camera,order.destination)
+		button.project(_camera,order.destination,_camera.marker_scale())
 
 func _configure_marker(marker: UnitMarker, order: Dictionary) -> void:
 	marker.player_id = int(state.get("player_id",0))

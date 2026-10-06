@@ -16,7 +16,7 @@ func endpoint(origin: Vector3, solution: Dictionary) -> Vector3:
 func _initialize() -> void:
 	var data := ConfirmedGameData.new()
 	check(is_equal_approx(data.ammunition("A_556").initial_speed_mps,900.0),"rifle speed from DATA km/h")
-	check(is_equal_approx(data.ammunition("A_M252_HE").initial_speed_mps,225.0),"mortar speed from DATA km/h")
+	check(is_nan(data.ammunition("A_M252_HE").initial_speed_mps) and data.ammunition("A_M252_HE").distance_selected_launch,"indirect speed selected at emission, not DATA")
 	check(is_nan(data.ammunition("A_CG_HE").initial_speed_mps),"missing HE speed remains unconfigured")
 	for row: Dictionary in data.records.Ammo:
 		var expected := data.number(row,"Projectile_Speed_kmh") / 3.6

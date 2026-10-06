@@ -8,6 +8,7 @@ script = ExtResource("1")
 movement_speed = 18.0
 maximum_pan_speed = 140.0
 height_scaled_pan = true
+zoom_scaled_markers = true
 zoom_step = 2.0
 zoom_distance_fraction = 0.15
 minimum_distance = 6.0

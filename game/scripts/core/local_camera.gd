@@ -1,5 +1,9 @@
 extends Camera3D
 
+func marker_scale() -> float:
+	if not config.zoom_scaled_markers: return 1.0
+	return clampf(sqrt(config.marker_reference_distance / maxf(_distance, config.marker_reference_distance)), config.minimum_marker_scale, 1.0)
+
 signal rotation_started
 
 @export var config: CameraConfig = preload("res://data/prototype_camera.tres")

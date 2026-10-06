@@ -179,7 +179,7 @@ func run() -> void:
 	check(cg_fire.advance(2.999,2,cg_aim).is_empty() and cg_fire.advance(0.001,3,cg_aim).size() == 1,"CG preparation cadence endpoint")
 	var active := Prototype05DCatalog.shared()
 	for pair: Array in [["rifle","W_M4A1"],["lmg","W_M249"],["vehicle_mg","W_M249V"]]:
-		check(active.weapons[pair[0]].data_source == "DB29:RTT_GAME_DATA.xlsx" and active.weapons[pair[0]].game_projectile_interval == data.weapon(pair[1]).game_projectile_interval,"active formal performance "+str(pair[0]))
+		check(active.weapons[pair[0]].data_source == "DB40:RTT_GAME_DATA.xlsx" and active.weapons[pair[0]].game_projectile_interval == data.weapon(pair[1]).game_projectile_interval,"active formal performance "+str(pair[0]))
 	var preset := active.squad(false)
 	check(preset.configuration_source.begins_with("test_only:") and preset.resource_name.begins_with("test_only_"),"activity layout explicitly test only")
 	check(state(preset).unassigned_inventory.is_empty(),"active AT4 doesn't inherit five stock")

@@ -14,3 +14,7 @@ extends Resource
 @export var height_scaled_pan := false
 @export_range(0.1, 300.0) var maximum_pan_speed := 18.0
 @export_range(0.0, 0.5) var zoom_distance_fraction := 0.0
+
+@export var zoom_scaled_markers := false
+@export_range(1.0, 1000.0) var marker_reference_distance := 60.0
+@export_range(0.1, 1.0) var minimum_marker_scale := 0.6

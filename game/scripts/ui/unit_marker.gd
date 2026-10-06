@@ -39,9 +39,10 @@ func refresh() -> void:
 	modulate = Color(style.order_brightness,style.order_brightness,style.order_brightness) if is_order else Color.WHITE
 	queue_redraw()
 
-func project(camera: Camera3D, world_position: Vector3) -> void:
+func project(camera: Camera3D, world_position: Vector3, zoom_scale: float = 1.0) -> void:
+	scale = Vector2.ONE * zoom_scale
 	visible = camera != null and not camera.is_position_behind(world_position)
-	if visible: position = camera.unproject_position(world_position)-style.body_size*0.5
+	if visible: position = camera.unproject_position(world_position)-style.body_size*scale*0.5
 
 func _gui_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton: return

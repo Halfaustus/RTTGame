@@ -161,7 +161,7 @@ func _handle_world_input(event: InputEvent) -> void:
 		if event.keycode in [KEY_G,KEY_T] and event.pressed and not event.echo and not event.ctrl_pressed and not event.alt_pressed and not event.shift_pressed and get_viewport().gui_get_focus_owner() == null:
 			_consume_move_mode()
 			_fire_mode = "artillery" if event.keycode == KEY_T else "ground_fire"
-			_movement_mode_hint.text = "T 单点一发：右键选择落点，E 退出" if _fire_mode == "artillery" else "G 强制地面开火：右键选择位置，E 退出"
+			_movement_mode_hint.text = "T 单点一发：左键选择落点，E 退出" if _fire_mode == "artillery" else "G 强制地面开火：左键选择位置，E 退出"
 			_movement_mode_hint.show()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_TAB and event.pressed and not event.echo and get_viewport().gui_get_focus_owner() == null:
@@ -197,7 +197,11 @@ func _handle_world_input(event: InputEvent) -> void:
 			_cancel_right_drag()
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			if not _fire_mode.is_empty() or _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed:
+			if not _fire_mode.is_empty():
+				if event.pressed: _confirm_fire(event.position)
+				get_viewport().set_input_as_handled()
+				return
+			if _attack_move_armed or _fast_move_armed or _reverse_move_armed or _right_pressed:
 				_consume_move_mode()
 				_cancel_right_drag()
 				_cancel_drag()
@@ -218,6 +222,9 @@ func _handle_world_input(event: InputEvent) -> void:
 				_cancel_drag()
 			get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_RIGHT and not _left_pressed:
+			if not _fire_mode.is_empty():
+				get_viewport().set_input_as_handled()
+				return
 			if event.pressed:
 				_right_pressed = true
 				_right_start = event.position
@@ -226,12 +233,6 @@ func _handle_world_input(event: InputEvent) -> void:
 				_right_mode = _current_move_mode()
 			elif _right_pressed:
 				_right_dragging = _right_dragging or event.position.distance_to(_right_start) > DRAG_THRESHOLD
-				if not _fire_mode.is_empty():
-					_queue_action({"type":_fire_mode,"position":_ground_at(event.position)})
-					_consume_move_mode()
-					_cancel_right_drag()
-					get_viewport().set_input_as_handled()
-					return
 				_queue_action({"type": "move", "position": _right_start if _right_dragging else event.position, "end": event.position, "dragged": _right_dragging, "mode": _right_mode,
 					"ground": _right_ground if _right_dragging else _ground_at(event.position), "tip": _ground_at(event.position)})
 				_consume_move_mode()
@@ -254,6 +255,11 @@ func _open_menu() -> void:
 		menu.add_child(resume)
 		resume.pressed.connect(func(): menu.hide(); resume.release_focus())
 	menu.show()
+
+func _confirm_fire(position: Vector2) -> void:
+	_queue_action({"type":_fire_mode,"position":_ground_at(position)})
+	_consume_move_mode()
+	_cancel_drag()
 
 func _update_drag(position: Vector2) -> void:
 	if position.distance_to(_drag_start) > DRAG_THRESHOLD:
@@ -542,7 +548,7 @@ func _clear_artillery_preview() -> void:
 	if _artillery_distance != null: _artillery_distance.hide()
 
 func _update_artillery_preview(position: Vector2) -> void:
-	if replay_mode or _fire_mode != "artillery" or _camera.is_rotating():
+	if replay_mode or _fire_mode.is_empty() or _camera.is_rotating():
 		_clear_artillery_preview()
 		return
 	var point: Variant = _ground_at(position)
@@ -551,7 +557,7 @@ func _update_artillery_preview(position: Vector2) -> void:
 	for id: int in _selected_units:
 		if _selected_units[id].owner_player_id != NetworkManager.local_player_id or NetworkManager.local_player_id <= 0: continue
 		if presentation_source.live_structures.has(id): structures.append(presentation_source.live_structures[id])
-	_artillery_distance.text = _artillery_preview.show_targets(structures,point)
+	_artillery_distance.text = _artillery_preview.show_targets(structures,point,_fire_mode == "artillery")
 	_artillery_distance.position = position+Vector2(16,20)
 	_artillery_distance.show()
 
@@ -564,11 +570,14 @@ func _process(_delta: float) -> void:
 	if _artillery_preview != null: _update_artillery_preview(get_viewport().get_mouse_position())
 	for id: int in _unit_markers:
 		var unit := _visual_units[id]
-		_unit_markers[id].project(_camera,unit.global_position)
+		_unit_markers[id].project(_camera,unit.global_position,1.0 if replay_mode else _camera.marker_scale())
 		_unit_markers[id].visible = _unit_markers[id].visible and unit.is_visible_in_tree()
 
 func _choose_marker(shift: bool,double_click: bool,id: int) -> void:
 	if replay_mode or _camera.is_rotating() or (_deployment_ui != null and _deployment_ui.owns_commands()): return
+	if not _fire_mode.is_empty():
+		_confirm_fire(get_viewport().get_mouse_position())
+		return
 	if _fast_move_armed or _attack_move_armed or _reverse_move_armed:
 		_cancel_fast_move()
 		_cancel_attack_move()

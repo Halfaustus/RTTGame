@@ -146,7 +146,11 @@ func _valid(event: Dictionary,step_end: float) -> bool:
 	if not event.position is Vector3 or not event.velocity is Vector3 or not event.ammo is AmmoDefinition: return false
 	var ammo: AmmoDefinition = event.ammo
 	var timestamp := float(event.time_seconds)
-	return not str(event.event_id).is_empty() and event.position.is_finite() and event.velocity.is_finite() and is_finite(timestamp) and timestamp >= time_seconds and timestamp <= step_end and is_finite(ammo.initial_speed_mps) and ammo.initial_speed_mps > 0.0 and absf(event.velocity.length()-ammo.initial_speed_mps) <= maxf(0.001,ammo.initial_speed_mps*0.000001)
+	var speed: float = event.velocity.length()
+	var launch_valid := is_finite(speed) and speed > 0.0
+	if not ammo.distance_selected_launch:
+		launch_valid = launch_valid and is_finite(ammo.initial_speed_mps) and ammo.initial_speed_mps > 0.0 and absf(speed-ammo.initial_speed_mps) <= maxf(0.001,ammo.initial_speed_mps*0.000001)
+	return not str(event.event_id).is_empty() and event.position.is_finite() and event.velocity.is_finite() and is_finite(timestamp) and timestamp >= time_seconds and timestamp <= step_end and launch_valid
 
 func _event(state: Dictionary,reason: String) -> Dictionary:
 	return {"reason":reason,"projectile_id":state.id,"source_event_id":state.source.event_id,"emission_order":state.source.emission_order,"unit_id":state.source.unit_id,"owner_player_id":state.source.owner_player_id,"weapon_instance_id":state.source.weapon_instance_id,"ammo_definition_id":state.ammo.ammo_id,"time_seconds":state.time_seconds,"position":state.position,"velocity":state.velocity,"distance_m":state.distance_m,"slot_generation":state.generation,"acceleration":GravityBallistics.GRAVITY}

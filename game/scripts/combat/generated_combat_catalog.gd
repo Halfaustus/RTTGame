@@ -29,8 +29,7 @@ static func squad() -> UnitDefinition:
 		allocation.definition = weapon
 		allocation.member_id = i+1
 		allocation.retention_priority = 0 if weapon.squad_weapon else 1
-		for ammo: AmmoDefinition in weapon.ammo_definitions:
-			allocation.initial_inventory[ammo.ammo_id] = int(data.number(data.record("Ammo",ammo.ammo_id),"Initial_Inventory_rounds"))
+		allocation.initial_inventory = data.initial_inventory_for_weapon(weapon.definition_id).inventory
 		unit.weapon_allocations.append(allocation)
 	return unit
 
@@ -56,7 +55,6 @@ static func mortar() -> UnitDefinition:
 	allocation.definition = weapon
 	allocation.member_id = 1
 	allocation.retention_priority = 0
-	for ammo: AmmoDefinition in weapon.ammo_definitions:
-		allocation.initial_inventory[ammo.ammo_id] = int(data.number(data.record("Ammo",ammo.ammo_id),"Initial_Inventory_rounds"))
+	allocation.initial_inventory = data.initial_inventory_for_weapon(weapon.definition_id).inventory
 	unit.weapon_allocations.append(allocation) # One mortar N=1, three operators.
 	return unit
