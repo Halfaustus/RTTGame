@@ -3,6 +3,7 @@ extends Control
 
 signal input_ownership_changed(active: bool)
 signal request_sent(action: String, payload: Dictionary, request_id: int)
+signal battlefield_notice(text: String)
 
 var state: Dictionary = {}
 var busy := false
@@ -13,7 +14,7 @@ var _network: Node
 var _camera: Camera3D
 var _ground: Callable
 var _point: OptionButton
-var _move_mode: OptionButton
+var spawn_move_mode := MovementSimulation.MoveMode.BASIC
 var _rows: VBoxContainer
 var _balance: Label
 var _message: Label
@@ -21,6 +22,7 @@ var _ghost: UnitMarker
 var _markers: Dictionary[int, UnitMarker] = {}
 var _purchase_buttons: Dictionary[String, Button] = {}
 var _transport_enabled := true
+var external_messages := false
 
 func setup(camera: Camera3D, ground: Callable) -> void:
 	_camera = camera
@@ -46,11 +48,6 @@ func _ready() -> void:
 	_point.focus_mode = Control.FOCUS_NONE
 	_point.item_selected.connect(func(_index: int): _refresh_rows())
 	box.add_child(_point)
-	_move_mode = OptionButton.new()
-	_move_mode.add_item("生成后：基本移动", MovementSimulation.MoveMode.BASIC)
-	_move_mode.add_item("生成后：快速移动", MovementSimulation.MoveMode.FAST)
-	_move_mode.focus_mode = Control.FOCUS_NONE
-	box.add_child(_move_mode)
 	_rows = VBoxContainer.new()
 	box.add_child(_rows)
 	_message = Label.new()
@@ -93,12 +90,14 @@ func apply_state(snapshot: Dictionary) -> void:
 func apply_result(result: Dictionary) -> void:
 	if result.get("request_type", "") == "generated":
 		_message.text = "单位 #%d 已部署%s" % [result.unit_id, "：" + str(result.notice) if not str(result.notice).is_empty() else ""]
+		if not str(result.get("notice", "")).is_empty(): battlefield_notice.emit(str(result.notice))
 		return
 	if _awaiting_id == 0 or int(result.get("request_id", 0)) != _awaiting_id:
 		return
 	busy = false
 	_awaiting_id = 0
 	_message.text = "服务器拒绝：" + str(result.get("reason", "unknown")) if not result.ok else ("拿起兵牌：左键放置，右键或 E 取消退款" if held_id else "服务器已确认操作")
+	if not result.ok: battlefield_notice.emit(_message.text)
 	_refresh_rows()
 	input_ownership_changed.emit(owns_commands())
 
@@ -107,6 +106,7 @@ func reset_connection() -> void:
 	_awaiting_id = 0
 	apply_state({})
 	_message.text = "连接已结束，购买不可用"
+	if external_messages: battlefield_notice.emit(_message.text)
 
 func _refresh_rows() -> void:
 	# Keep button identities through frequent countdown snapshots. Replacing a
@@ -144,7 +144,7 @@ func pickup(order_id: int) -> void:
 
 func place(destination: Vector3) -> void:
 	if held_id != 0 and not busy:
-		_send("place", {"order_id":held_id,"destination":destination,"mode":_move_mode.get_selected_id()})
+		_send("place", {"order_id":held_id,"destination":destination,"mode":spawn_move_mode})
 
 func cancel() -> void:
 	if held_id != 0 and not busy:
@@ -268,4 +268,4 @@ static func status_text(order: Dictionary) -> String:
 	return "未启用部署状态"
 
 static func _name_for(config_id: String) -> String:
-	return {"test.armored":"装甲车辆", "test.rifle":"武装步兵", "test.unarmed":"无武器步兵"}.get(config_id, config_id)
+	return {"test.armored":"装甲车辆", "test.rifle":"武装步兵", "test.unarmed":"无武器步兵", "test.editor.top":"TEST ONLY 攻顶射手", "test.editor.armor":"TEST ONLY 装甲目标"}.get(config_id, config_id)

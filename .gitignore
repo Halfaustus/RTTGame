@@ -24,3 +24,9 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
+
+# Local read-only third-party research, never a production asset
+docs/DataBaseCompiled-resources.assets-15820.json
+
+# Generated editor diagnostics stay local; source test configuration is retained
+game/data/test_only/*_diagnostics.json

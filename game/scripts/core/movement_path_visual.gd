@@ -6,6 +6,10 @@ const PATH_WIDTH: float = 0.06
 
 var _path_mesh := ImmediateMesh.new()
 
+func set_move_mode(mode: int) -> void:
+	var colors := {MovementSimulation.MoveMode.BASIC:Color.WHITE,MovementSimulation.MoveMode.FAST:Color.BLUE,MovementSimulation.MoveMode.ATTACK:Color.YELLOW,MovementSimulation.MoveMode.REVERSE:Color.YELLOW}
+	(material_override as StandardMaterial3D).albedo_color = colors.get(mode,Color.WHITE)
+
 
 func _init() -> void:
 	mesh = _path_mesh

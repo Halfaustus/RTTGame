@@ -1,6 +1,8 @@
 class_name PresentationFeed
 extends RefCounted
 
+signal unit_move_modes_received(unit_ids: Array[int], modes: Array[int])
+
 # This interface carries display results only. It has no transport or simulation.
 signal reset_received
 signal unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3)
@@ -15,6 +17,7 @@ signal unit_armament_received(unit_id: int, armed: bool)
 signal unit_type_received(unit_id: int, unit_type: int)
 signal unit_orientations_received(unit_ids: Array[int], yaws: Array[float])
 signal unit_structure_received(state: Dictionary)
+signal unit_status_received(state: Dictionary)
 signal unit_identity_received(unit_id: int, player_id: int, definition_id: String)
 signal unit_member_count_received(unit_id: int, count: int)
 var live_structures: Dictionary[int, Dictionary] = {}

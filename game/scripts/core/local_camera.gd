@@ -21,6 +21,7 @@ var _rotating := false
 var _saved_mouse_mode: Input.MouseMode
 var _saved_mouse_position: Vector2
 var _enabled := true
+var input_blocked := false
 
 
 func _ready() -> void:
@@ -46,6 +47,12 @@ func _exit_tree() -> void:
 
 func is_rotating() -> bool:
 	return _rotating
+
+func focus_position(position: Vector3) -> void:
+	if not _enabled or not position.is_finite(): return
+	_center = position
+	_center.y = config.ground_height
+	_apply_view()
 
 
 func _gui_blocked() -> bool:
@@ -75,7 +82,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_camera_input(event: InputEvent) -> bool:
-	if not _enabled:
+	if not _enabled or input_blocked:
+		if input_blocked: cancel_controls()
 		return false
 	if _gui_blocked():
 		cancel_controls()

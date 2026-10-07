@@ -7,6 +7,8 @@ signal deployment_event(event: Dictionary)
 signal weapon_fire_received(event: Dictionary)
 signal projectile_spawn_received(event: Dictionary)
 signal projectile_terminal_received(event: Dictionary)
+signal acceptance_explosion_received(event: Dictionary)
+signal command_notice_received(notice: Dictionary)
 
 signal unit_spawn_received(unit_id: int, owner_peer_id: int, position: Vector3)
 signal unit_positions_received(unit_ids: Array[int], positions: Array[Vector3])
@@ -51,6 +53,10 @@ var _snapshot_ticks := 300
 var _next_unit_id: int = 1
 var _authoritative_units: Dictionary[int, UnitState] = {}
 var _movement := MovementSimulation.new(MOVEMENT_CONFIG)
+var _task_queue := UnitTaskQueue.new()
+var _task_queue_revision := -1
+signal task_queue_received(rows: Array)
+var local_task_queues: Dictionary = {}
 var _pending_positions: Dictionary[int, Vector3] = {}
 var _replication_elapsed: float = 0.0
 var _combat := CombatSimulation.new(MovementSimulation.MAP_DEFINITION)
@@ -65,6 +71,29 @@ var legacy_combat_fixture_enabled := false # Explicit historical test opt-in onl
 var _weapon_presets: Array[UnitDefinition] = [preload("res://data/units/db33_active_test_squad.tres"),preload("res://data/units/db33_active_test_squad.tres")]
 var _rebels_initialized: bool = false
 var _player_spawn_index: int = 1
+var acceptance_06c := false
+var acceptance_full_06 := false
+var _acceptance_auto_units: Dictionary = {}
+var _acceptance_known_enemies: Dictionary = {}
+
+func configure_acceptance_06c(full: bool = false) -> bool:
+	if deployment.is_ready() or not _authoritative_units.is_empty() or timeline.tick != 0 or legacy_combat_fixture_enabled: return false
+	var presets: Array[UnitDefinition] = [load("res://data/units/acceptance_06c_normal.tres"),load("res://data/units/acceptance_06c_top.tres"),load("res://data/units/acceptance_06c_armor.tres")]
+	if full:
+		presets.append(load("res://data/units/acceptance_06c_suppression.tres"))
+		presets.append(load("res://data/units/acceptance_06c_modules.tres"))
+		presets.append(load("res://data/units/acceptance_06c_manual.tres"))
+		presets.append(load("res://data/units/acceptance_06c_mechanical.tres"))
+	for definition: UnitDefinition in presets:
+		if definition == null or not definition.configuration_source.begins_with("test_only:rtt_unit_editor:") or not definition.spatial_valid(): return false
+	_weapon_presets = presets
+	acceptance_06c = true
+	acceptance_full_06 = full
+	if full: _movement._config.units_per_peer = 7
+	return true
+
+func _unit_disclosed(id: int) -> bool:
+	return _authoritative_units.has(id) and (_authoritative_units[id].team_id == COMBAT_CONFIG.player_team_id or (acceptance_06c and _acceptance_known_enemies.has(id)))
 
 # Explicit activity selection; historical isolated models retain their map.
 func configure_active_test_map() -> bool:
@@ -202,6 +231,7 @@ func _on_peer_connected(peer_id: int) -> void:
 
 
 func _apply_peer_join(peer_id: int) -> void:
+	_task_queue_revision = -1
 	if _peer_players.has(peer_id):
 		return
 	var player_id := _next_player_id
@@ -223,6 +253,7 @@ func _apply_peer_join(peer_id: int) -> void:
 		var unit_id := _next_unit_id
 		_next_unit_id += 1
 		var spawn: Vector3 = _movement._config.spawn_position(_player_spawn_index)
+		if acceptance_full_06: spawn = Vector3(-18.0+index*7.0,0.5,108.0+(player_id-1)*7.0) # TEST ONLY clear lanes, outside existing obstacles.
 		_player_spawn_index += 1
 		var state := UnitState.new(unit_id, peer_id, spawn)
 		state.owner_player_id = player_id
@@ -242,16 +273,24 @@ func _apply_peer_join(peer_id: int) -> void:
 		print("Authoritative unit %d created. Owner peer: %d; match player: %d" % [unit_id, peer_id, player_id])
 		if not multiplayer.get_peers().is_empty():
 			_queue_replication("_receive_unit_snapshot", [_presentation_snapshot(state)])
+		if acceptance_06c: print("TEST ONLY 06C UNIT "+JSON.stringify(_presentation_snapshot(state)))
 
 
 func _initialize_rebels() -> void:
 	if _rebels_initialized:
 		return
 	_rebels_initialized = true
-	for requested: Vector3 in COMBAT_CONFIG.rebel_positions:
+	var positions: Array[Vector3] = COMBAT_CONFIG.rebel_positions
+	if acceptance_06c: positions = [Vector3(-12,0.5,96),Vector3(-3,0.5,96),Vector3(8,0.5,96)]
+	for index: int in positions.size():
+		var requested: Vector3 = positions[index]
 		var state := UnitState.new(_next_unit_id, 0, requested)
 		_next_unit_id += 1
 		state.configure(COMBAT_CONFIG.rebel_team_id, COMBAT_CONFIG.rebel_definition if legacy_combat_fixture_enabled else _weapon_presets[1])
+		if acceptance_06c:
+			state.configure(COMBAT_CONFIG.rebel_team_id,load("res://data/units/acceptance_06c_infantry.tres") if index == 0 else _weapon_presets[2])
+			if index == 2: state.yaw = PI/2.0
+			_acceptance_known_enemies[state.unit_id] = true
 		var sized_spawn: Variant = _movement.resolve_spawn_position(state.position, state)
 		if sized_spawn == null:
 			push_error("No valid unit-sized rebel spawn.")
@@ -261,6 +300,7 @@ func _initialize_rebels() -> void:
 		_movement.add_unit(state)
 		_combat.add_unit(state)
 		if not legacy_combat_fixture_enabled: _aiming.inputs[state.unit_id] = {"moving_spread_multiplier":1.5} # TEST ONLY, never DATA.
+		if acceptance_06c: print("TEST ONLY 06C UNIT "+JSON.stringify(_presentation_snapshot(state)))
 
 
 func live_snapshots() -> Array[Dictionary]:
@@ -309,12 +349,12 @@ func request_move(unit_id: int, target_position: Vector3, mode: int = MovementSi
 	_submit_move.rpc_id(1, unit_id, target_position, mode)
 
 
-func request_moves(unit_ids: Array[int], target_position: Vector3, mode: int = MovementSimulation.MoveMode.BASIC, facing: Vector3 = Vector3.ZERO) -> void:
+func request_moves(unit_ids: Array[int], target_position: Vector3, mode: int = MovementSimulation.MoveMode.BASIC, facing: Vector3 = Vector3.ZERO, append: bool = false) -> void:
 	if multiplayer.is_server():
 		return
 	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return
-	_submit_group_move.rpc_id(1, unit_ids, target_position, mode, facing)
+	_submit_group_move.rpc_id(1, unit_ids, target_position, mode, facing, append)
 
 
 func request_stops(unit_ids: Array[int]) -> void:
@@ -324,17 +364,92 @@ func request_stops(unit_ids: Array[int]) -> void:
 		return
 	_submit_stop.rpc_id(1, unit_ids)
 
-func request_ground_fire(unit_ids: Array[int],point: Vector3,artillery: bool = false,count: int = 1) -> void:
+func request_ground_fire(unit_ids: Array[int],point: Vector3,artillery: bool = false,count: int = 1,append: bool = false) -> void:
 	if unit_ids.is_empty() or multiplayer.is_server(): return
 	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED: return
-	_submit_ground_fire.rpc_id(1,unit_ids,point,artillery,count)
+	_submit_ground_fire.rpc_id(1,unit_ids,point,artillery,count,append)
+
+func request_acceptance_auto(unit_ids: Array[int],enabled: bool) -> void:
+	if not acceptance_full_06 or unit_ids.is_empty() or multiplayer.is_server(): return
+	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED: return
+	_submit_acceptance_auto.rpc_id(1,unit_ids,enabled)
+
+func request_acceptance_module_probe(unit_ids: Array[int]) -> void:
+	if not acceptance_full_06 or unit_ids.is_empty() or multiplayer.is_server(): return
+	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED: return
+	_submit_acceptance_module_probe.rpc_id(1,unit_ids)
+
+@rpc("any_peer","call_remote","reliable")
+func _submit_acceptance_module_probe(unit_ids: Array[int]) -> void:
+	if not acceptance_full_06 or not multiplayer.is_server(): return
+	var sender := multiplayer.get_remote_sender_id()
+	if not multiplayer.get_peers().has(sender): return
+	_queue_command({"type":"acceptance_module_probe","unit_ids":unit_ids.duplicate(),"mode":-1,"group":false},sender)
+
+func _acceptance_probe_command(target: UnitState,sender: int,player: int) -> Dictionary:
+	for source: UnitState in _authoritative_units.values():
+		if source.owner_peer_id != sender or source.owner_player_id != player or source.health <= 0 or source.definition.resource_path != "res://data/units/acceptance_06c_modules.tres": continue
+		if source.runtime_weapons.is_empty(): continue
+		var weapon: RuntimeWeaponInstance = source.runtime_weapons[0]
+		var origin := DirectBallistics.muzzle(weapon,_aiming.inputs.get(source.unit_id,{}))
+		var aim := target.position-Vector3.UP*target.definition.hitbox_half_extents.y*0.5
+		var downward := origin.y-aim.y
+		if downward <= 0: return {}
+		var point := origin+(aim-origin)*(origin.y/downward)
+		point.y = 0
+		return {"type":"ground_fire","unit_ids":[source.unit_id],"peer_id":sender,"player_id":player,"target":point,"count":1,"mode":-1,"facing":Vector3.ZERO,"group":false}
+	return {}
+
+@rpc("any_peer","call_remote","reliable")
+func _submit_acceptance_auto(unit_ids: Array[int],enabled: bool) -> void:
+	if not acceptance_full_06 or not multiplayer.is_server(): return
+	var sender := multiplayer.get_remote_sender_id()
+	if not multiplayer.get_peers().has(sender): return
+	_queue_command({"type":"acceptance_auto","unit_ids":unit_ids.duplicate(),"enabled":enabled,"mode":-1,"group":false},sender)
+
+func _acceptance_nearest_target(weapon: RuntimeWeaponInstance) -> AttackTarget:
+	var owner := weapon.owner_state()
+	if not acceptance_full_06 or not _acceptance_auto_units.has(owner.unit_id) or owner.health <= 0 or weapon.definition.definition_id == "W_M252": return null
+	var best: AttackTarget = null
+	var best_distance := INF
+	var previous := weapon.target
+	for id: int in _acceptance_known_enemies:
+		if not _authoritative_units.has(id): continue
+		var target: UnitState = _authoritative_units[id]
+		if target.health <= 0 or target.team_id == owner.team_id: continue
+		var candidate := AttackTarget.unit(target)
+		weapon.target = candidate
+		var sample := {"moving":false} if _movement._attack_moves.has(owner.unit_id) else {}
+		var eligible := _aiming.eligibility(weapon,sample) == "eligible"
+		var distance := weapon.world_position().distance_squared_to(target.position)
+		if eligible and (distance < best_distance or (distance == best_distance and (best == null or id < best.unit_id))): best = candidate; best_distance = distance
+	weapon.target = previous
+	return best
+
+func _update_acceptance_engagement() -> void:
+	if not acceptance_full_06: return
+	for id: int in _movement._attack_moves:
+		var engaging := false
+		for weapon: RuntimeWeaponInstance in _authoritative_units[id].runtime_weapons:
+			# Keep a valid existing target; otherwise select and bind the very target
+			# used to stop the route. A stale out-of-range target cannot park us forever.
+			if weapon.target != null and _aiming.eligibility(weapon,{"moving":false}) == "eligible":
+				engaging = true
+				continue
+			if weapon.target != null and weapon.manual_target: continue
+			var candidate := _acceptance_nearest_target(weapon)
+			if candidate != null:
+				weapon.bind_target(candidate,false)
+				engaging = true
+		if engaging: _movement._engaging[id] = true
+		else: _movement._engaging.erase(id)
 
 @rpc("any_peer", "call_remote", "reliable")
-func _submit_ground_fire(unit_ids: Array[int],point: Vector3,artillery: bool,count: int) -> void:
+func _submit_ground_fire(unit_ids: Array[int],point: Vector3,artillery: bool,count: int,append: bool = false) -> void:
 	if not multiplayer.is_server(): return
 	var sender := multiplayer.get_remote_sender_id()
 	if not multiplayer.get_peers().has(sender): return
-	_queue_command({"type":"artillery" if artillery else "ground_fire","unit_ids":unit_ids.duplicate(),"target":point,"count":count,"mode":-1,"facing":Vector3.ZERO,"group":false},sender)
+	_queue_command({"type":"artillery" if artillery else "ground_fire","unit_ids":unit_ids.duplicate(),"target":point,"count":count,"mode":-1,"facing":Vector3.ZERO,"group":false,"append":append},sender)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -351,6 +466,7 @@ func _apply_stop(unit_ids: Array[int], sender: int) -> Dictionary:
 	var accepted := _movement.request_stop(unit_ids, sender)
 	var positions: Array[Vector3] = []
 	for unit_id: int in accepted:
+		_task_queue.cancel(unit_id)
 		positions.append(_authoritative_units[unit_id].position)
 		_artillery.cancel(_authoritative_units[unit_id])
 		for instance: RuntimeWeaponInstance in _authoritative_units[unit_id].runtime_weapons: instance.clear_target()
@@ -374,13 +490,13 @@ func _receive_unit_stops(unit_ids: Array[int], positions: Array[Vector3]) -> voi
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _submit_group_move(unit_ids: Array[int], target_position: Vector3, mode: int = MovementSimulation.MoveMode.BASIC, facing: Vector3 = Vector3.ZERO) -> void:
+func _submit_group_move(unit_ids: Array[int], target_position: Vector3, mode: int = MovementSimulation.MoveMode.BASIC, facing: Vector3 = Vector3.ZERO, append: bool = false) -> void:
 	if not multiplayer.is_server():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if not multiplayer.get_peers().has(sender):
 		return
-	_queue_command({"type": "move", "unit_ids": unit_ids.duplicate(), "mode": mode, "target": target_position, "facing": facing, "group": true}, sender)
+	_queue_command({"type": "move", "unit_ids": unit_ids.duplicate(), "mode": mode, "target": target_position, "facing": facing, "group": true,"append":append}, sender)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -411,6 +527,13 @@ func _receive_move_paths(unit_ids: Array[int], paths: Array[PackedVector3Array])
 		return
 	presentation.unit_move_paths_received.emit(unit_ids, paths)
 
+@rpc("authority", "call_remote", "reliable")
+func _receive_move_modes(unit_ids: Array[int], modes: Array[int]) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	if unit_ids.size() != modes.size(): return
+	if modes.any(func(mode): return mode not in [MovementSimulation.MoveMode.BASIC,MovementSimulation.MoveMode.FAST,MovementSimulation.MoveMode.ATTACK,MovementSimulation.MoveMode.REVERSE]): return
+	presentation.unit_move_modes_received.emit(unit_ids,modes)
+
 
 func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server():
@@ -439,15 +562,18 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 	# separate economic stream, adjudicated here before any spawn or movement.
 	timeline.enter_phase("commands")
 	_consume_commands(connected_peers)
+	_advance_task_queues(connected_peers)
 	timeline.enter_phase("movement")
 	var delta := timeline.seconds_per_tick()
 	for id: int in _movement.active_command_ids():
 		_dirty_units[id] = true
 	_aiming.units = _authoritative_units
 	# No detection provider exists yet: never equate valid enemy with visible enemy.
-	_aiming.visibility = func(owner: UnitState, target: AttackTarget): return target.kind == AttackTarget.Kind.FORCED_GROUND or (target.valid(_authoritative_units) and _authoritative_units[target.unit_id].team_id == owner.team_id)
+	_aiming.visibility = func(owner: UnitState, target: AttackTarget): return target.kind == AttackTarget.Kind.FORCED_GROUND or (target.valid(_authoritative_units) and (_authoritative_units[target.unit_id].team_id == owner.team_id or (acceptance_full_06 and _acceptance_known_enemies.has(target.unit_id))))
+	_aiming.automatic_target_provider = _acceptance_nearest_target if acceptance_full_06 else Callable()
 	_aiming.clear_path = _combat.has_line_of_sight
 	_aiming.moving = _movement.is_moving
+	_update_acceptance_engagement()
 	var changed: Dictionary = {}
 	var fixed_result := {"emissions":[],"events":[]}
 	if legacy_combat_fixture_enabled:
@@ -456,13 +582,40 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 		changed = _movement.advance(delta)
 	else:
 		if _projectiles == null:
+			_ensure_match_header()
+			if not _combat_timeline.configure_settlement_context({"match_id":_match_header.match_id,
+				"map_id":_movement._config.resource_path,"map_sha256":FileAccess.get_sha256(_movement._config.resource_path),
+				"rules_id":ConfirmedDataValidator.RULES_ID,"data_version":ConfirmedDataValidator.DATA_VERSION,
+				"data_sha256":FileAccess.get_sha256(ConfirmedGameData.PATH)}):
+				push_error("Settlement context rejected: "+_combat_timeline.settlement_inbox.failure_reason)
+				return
 			_projectiles = _combat_timeline.projectiles
 			_projectiles.configure_bounds(Rect2(_movement._config.minimum_xz,_movement._config.maximum_xz-_movement._config.minimum_xz))
 			_projectiles.collision.initialize_map(MovementSimulation.MAP_DEFINITION,_movement._config)
 			_combat_timeline.fire = _fire
+			_combat_timeline.direct_hit_enabled = true
+			_combat_timeline.overpenetration_enabled = true
+			_combat_timeline.suppression_enabled = true
+			_combat_timeline.modules_enabled = true
 			_fire.fire_path_permission = func(_weapon,_origin,_point,_inputs): return true # Static eligibility and sampled friendly check own permission.
 		fixed_result = _combat_timeline.step_movement(_movement,_aiming)
 		changed = fixed_result.changed
+		# Health snapshots are authoritative live results, not acceptance logging.
+		var affected := {}
+		for outcome: Dictionary in fixed_result.get("damage_results",[]): affected[outcome.unit_id] = true
+		for id: int in affected: _queue_replication("_receive_unit_snapshot",[_presentation_snapshot(_authoritative_units[id])])
+		if acceptance_06c:
+			for envelope: Dictionary in fixed_result.get("settlements",[]):
+				var input: Dictionary = envelope.input
+				print("TEST ONLY 06C IMPACT "+JSON.stringify({"emission_order":input.emission_order,"kind":input.kind,"point":input.point,"time_seconds":input.time_seconds}))
+				if acceptance_full_06 and input.reason == "impact" and float(input.ammo_values.get("explosion_radius_m",0)) > 0:
+					_queue_replication("_receive_acceptance_explosion",[{"position":DirectHitSettlement.vector(input.point),"radius":float(input.ammo_values.explosion_radius_m)}])
+			for outcome: Dictionary in fixed_result.get("damage_results",[]):
+				print("TEST ONLY 06C DAMAGE "+JSON.stringify(outcome)) # Server console only, never RPC/replay.
+			for input: Dictionary in fixed_result.get("suppression_inputs",[]): print("TEST ONLY 06C SUPPRESSION INPUT "+JSON.stringify(input))
+			if acceptance_full_06:
+				for row: Dictionary in fixed_result.get("suppression_results",[]): print("TEST ONLY 06D RESULT "+JSON.stringify(row))
+				for row: Dictionary in fixed_result.get("module_results",[]): print("TEST ONLY 06E RESULT "+JSON.stringify(row))
 	_pending_positions.merge(changed, true)
 	for id: int in changed:
 		_dirty_units[id] = true
@@ -528,6 +681,7 @@ func _run_server_tick(connected_peers: PackedInt32Array) -> void:
 			var structures: Array[Dictionary] = []
 			for state: UnitState in _authoritative_units.values(): structures.append(state.structure_snapshot())
 			_queue_replication("_receive_unit_structures", [structures])
+			_queue_replication("_receive_unit_statuses", [structures])
 		for peer_id: int in _peer_players:
 			var player_id := _peer_players[peer_id]
 			if _dirty_deployment.has(player_id):
@@ -626,6 +780,7 @@ func _consume_sessions(connected_peers: PackedInt32Array) -> void:
 			_movement.stop_owner(peer_id)
 			for unit: UnitState in _authoritative_units.values():
 				if unit.owner_player_id == player_id:
+					_task_queue.cancel(unit.unit_id)
 					_dirty_units[unit.unit_id] = true
 			timeline.append("event", "player_leave", {"player_id": player_id, "peer_id": peer_id,
 				"reason": session.get("reason", "transport_disconnect")})
@@ -637,7 +792,9 @@ func _consume_commands(connected_peers: PackedInt32Array) -> void:
 	for command: Dictionary in commands:
 		var result := {"unit_ids": [], "failed_ids": [], "rejection": "sender disconnected or player changed"}
 		if connected_peers.has(command.peer_id) and _peer_players.get(command.peer_id, 0) == command.player_id:
-			result = _execute_command(command)
+			result = _submit_task_command(command)
+			var notice := _command_notice(command, result)
+			if not notice.is_empty(): _queue_replication("_receive_command_notice", [notice], command.peer_id)
 		var requested_ids: Array = []
 		for id: int in command.unit_ids:
 			requested_ids.append(ReplayFormat.request_integer(id))
@@ -654,6 +811,145 @@ func _consume_commands(connected_peers: PackedInt32Array) -> void:
 		if command.type in ["move","stop"]: timeline.append("command", command.type, payload)
 
 
+func _command_notice(command: Dictionary, result: Dictionary) -> Dictionary:
+	if _peer_players.get(int(command.get("peer_id", 0)), 0) != int(command.get("player_id", -1)): return {}
+	if command.get("type") not in ["move", "stop", "ground_fire", "artillery"]: return {}
+	var reason := str(result.get("rejection", ""))
+	if reason.is_empty() and result.get("failed_ids", []).is_empty(): return {}
+	var ids: Array[int] = []
+	for id: int in command.get("unit_ids", []):
+		if _authoritative_units.has(id) and _authoritative_units[id].owner_player_id == command.player_id and not ids.has(id): ids.append(id)
+	return {"command":command.type, "reason":reason if not reason.is_empty() else "部分单位无法执行", "unit_ids":ids, "_recipient_player_id":command.player_id}
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_command_notice(notice: Dictionary) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	if notice.get("command") not in ["move", "stop", "ground_fire", "artillery"] or not notice.get("reason") is String or not notice.get("unit_ids") is Array: return
+	command_notice_received.emit({"command":notice.command, "reason":notice.reason, "unit_ids":notice.unit_ids.duplicate()})
+
+func _task_eligible(command: Dictionary, unit: UnitState) -> bool:
+	if unit.health <= 0 or unit.owner_player_id != command.player_id or unit.owner_peer_id != command.peer_id: return false
+	if command.type == "move":
+		return command.mode in [0,1,2,3] and _movement._valid_speeds(unit) and (command.mode != MovementSimulation.MoveMode.ATTACK or unit.is_armed()) and (command.mode != MovementSimulation.MoveMode.REVERSE or _movement._can_reverse(unit))
+	if command.type == "artillery":
+		return unit.runtime_weapons.any(func(w): return w.definition.definition_id == "W_M252")
+	return unit.runtime_weapons.any(func(w): return w.definition.definition_id != "W_M252")
+
+func _submit_task_command(command: Dictionary) -> Dictionary:
+	if command.type not in ["move","ground_fire","artillery"]: return _execute_command(command)
+	var result := {"unit_ids":[],"failed_ids":[],"rejection":""}
+	if not command.target is Vector3 or not _movement._validate_target(command.target).is_empty():
+		result.rejection = "invalid task destination"
+		return result
+	if command.type == "move" and (not command.facing is Vector3 or not command.facing.is_finite() or not is_zero_approx(command.facing.y)):
+		result.rejection = "invalid facing"
+		return result
+	if command.type != "move" and int(command.count) not in [1,3,-1]:
+		result.rejection = "invalid fire count"
+		return result
+	var eligible: Array[int] = []
+	for id: int in command.unit_ids:
+		if eligible.has(id): continue
+		if _authoritative_units.has(id) and _task_eligible(command,_authoritative_units[id]):
+			if command.type == "artillery":
+				_aiming.units = _authoritative_units
+				var error := _artillery.submit(_authoritative_units[id],command.target,int(command.count),_aiming,_movement,true)
+				if not error.is_empty() and error != "ammunition_insufficient":
+					result.failed_ids.append(id)
+					result.rejection = error
+					continue
+			eligible.append(id)
+		elif _authoritative_units.has(id) and _authoritative_units[id].owner_player_id == command.player_id and _authoritative_units[id].owner_peer_id == command.peer_id:
+			result.failed_ids.append(id)
+	var append := bool(command.get("append",false))
+	# Plan all formation slots without changing current movement or fire state.
+	var destinations := {}
+	var formation_facing: Vector3 = command.facing
+	if command.type == "move" and command.group:
+		var plan := _movement.request_group_move(eligible,command.peer_id,command.target,command.mode,command.facing,true)
+		if not plan.rejection.is_empty():
+			result.rejection = plan.rejection
+			result.failed_ids.append_array(eligible)
+			return result
+		destinations = plan.destinations
+		formation_facing = Vector3(-sin(plan.final_yaw),0,-cos(plan.final_yaw))
+		for id: int in plan.failed_ids: result.failed_ids.append(id)
+		eligible.assign(plan.unit_ids)
+	for id: int in eligible:
+		var task := command.duplicate(true)
+		task.unit_ids = [id]
+		task.group = false
+		task["started"] = false
+		if destinations.has(id):
+			task.target = Vector3(destinations[id].x,_movement._config.ground_height,destinations[id].z)
+		if command.type == "move": task.facing = formation_facing
+		if append and _task_queue.current(id).is_empty() and _movement._targets.has(id):
+			var existing := task.duplicate(true)
+			existing.target = Vector3(_movement._targets[id].x,_movement._config.ground_height,_movement._targets[id].z)
+			existing.mode = _movement._move_modes[id]
+			existing.started = true
+			_task_queue.submit(id,existing,false)
+		if task.type == "move":
+			var start: Vector3 = _authoritative_units[id].position
+			if append and _task_queue.tasks.has(id): start = _task_queue.tasks[id].back().target
+			start.y = _authoritative_units[id].position.y
+			var destination: Vector3 = task.target
+			destination.y = start.y
+			task["path"] = _movement.navigation_for(_authoritative_units[id]).find_path(start,destination,[],0.0,task.mode == MovementSimulation.MoveMode.FAST,_authoritative_units[id])
+		if not append:
+			# Eligibility is checked first: unsupported mixed-selection units keep tasks.
+			_movement.request_stop([id],command.peer_id)
+			_artillery.cancel(_authoritative_units[id])
+			for weapon: RuntimeWeaponInstance in _authoritative_units[id].runtime_weapons: weapon.clear_target()
+			var stopped_ids: Array[int] = [id]
+			var stopped_positions: Array[Vector3] = [_authoritative_units[id].position]
+			_queue_replication("_receive_unit_stops",[stopped_ids,stopped_positions])
+		_task_queue.submit(id,task,append)
+		_dirty_units[id] = true
+		result.unit_ids.append(id)
+	if eligible.is_empty() and result.rejection.is_empty(): result.rejection = "no owned eligible units"
+	return result
+
+func _advance_task_queues(connected_peers: PackedInt32Array) -> void:
+	for id: int in _task_queue.tasks.keys():
+		var task := _task_queue.current(id)
+		var unit: UnitState = _authoritative_units.get(id)
+		if unit == null or unit.health <= 0 or not connected_peers.has(task.peer_id) or _peer_players.get(task.peer_id,0) != task.player_id or unit.owner_player_id != task.player_id:
+			_task_queue.cancel(id)
+			continue
+		if task.started:
+			var complete := false
+			if task.type == "move": complete = not _movement._targets.has(id) # Engaging / blocked is not arrival.
+			elif task.type == "artillery": complete = not unit.runtime_weapons.any(func(w): return _artillery.tasks.has(w.instance_id))
+			elif int(task.count) != -1: complete = not unit.runtime_weapons.any(func(w): return w.manual_target and w.forced_emissions_remaining != 0)
+			if not complete: continue
+			_task_queue.finish(id)
+			task = _task_queue.current(id)
+			if task.is_empty(): continue
+		var result := _execute_command(task)
+		if result.unit_ids.has(id): task.started = true
+		elif result.rejection in ["ammunition_insufficient","no reachable destination","no reachable destinations"]:
+			continue # Transient ammunition / occupancy shortages retain the head.
+		else:
+			var notice := _command_notice(task,result)
+			if not notice.is_empty(): _queue_replication("_receive_command_notice",[notice],task.peer_id)
+			_task_queue.finish(id)
+	if _task_queue_revision != _task_queue.revision:
+		_task_queue_revision = _task_queue.revision
+		for peer: int in connected_peers:
+			if not _peer_players.has(peer): continue
+			var rows: Array[Dictionary] = []
+			for unit: UnitState in _authoritative_units.values():
+				if unit.owner_player_id == _peer_players[peer]: rows.append({"unit_id":unit.unit_id,"tasks":_task_queue.projection(unit.unit_id)})
+			_replication_queue.append({"method":"_receive_task_queues","arguments":[rows],"peer_id":peer,"notice_player_id":_peer_players[peer]})
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_task_queues(rows: Array) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	local_task_queues.clear()
+	for row: Dictionary in rows: local_task_queues[row.unit_id] = row.tasks.duplicate(true)
+	task_queue_received.emit(rows)
+
 func _execute_command(command: Dictionary) -> Dictionary:
 	var ids: Array[int] = []
 	for id: int in command.unit_ids:
@@ -663,7 +959,26 @@ func _execute_command(command: Dictionary) -> Dictionary:
 		ids.append(id)
 	var sender: int = command.peer_id
 	var result := {"unit_ids": [], "failed_ids": [], "rejection": ""}
-	if command.type == "stop":
+	if command.type == "acceptance_module_probe":
+		if acceptance_full_06 and ids.size() == 1:
+			var target: UnitState = _authoritative_units.get(ids[0])
+			if target != null and target.owner_peer_id == sender and target.health > 0 and target.unit_type() == UnitDefinition.UnitType.ARMORED_VEHICLE:
+				var probe := _acceptance_probe_command(target,sender,int(command.player_id))
+				if not probe.is_empty(): return _execute_command(probe)
+		result.rejection = "select one owned living vehicle and keep module shooter alive"
+	elif command.type == "acceptance_auto":
+		if acceptance_full_06:
+			for id: int in ids:
+				if not _authoritative_units.has(id): continue
+				var unit: UnitState = _authoritative_units[id]
+				if unit.owner_peer_id != sender or unit.health <= 0 or not unit.is_armed(): continue
+				if command.enabled: _acceptance_auto_units[id] = true
+				else:
+					_acceptance_auto_units.erase(id)
+					for weapon: RuntimeWeaponInstance in unit.runtime_weapons:
+						if not weapon.manual_target: weapon.clear_target()
+				result.unit_ids.append(id)
+	elif command.type == "stop":
 		var stopped := _apply_stop(ids, sender)
 		result.unit_ids = stopped.unit_ids
 		if result.unit_ids.is_empty():
@@ -688,7 +1003,9 @@ func _execute_command(command: Dictionary) -> Dictionary:
 					_artillery.cancel(unit)
 					_movement.request_stop([id],sender)
 					for weapon: RuntimeWeaponInstance in unit.runtime_weapons:
-						if weapon.definition.definition_id != "W_M252": weapon.bind_single_ground_target(command.target)
+						if weapon.definition.definition_id != "W_M252":
+							if int(command.get("count",1)) == -1: weapon.bind_target(AttackTarget.ground(command.target),true)
+							else: weapon.bind_single_ground_target(command.target)
 				if reason.is_empty():
 					result.unit_ids.append(id)
 					_pending_positions.erase(id)
@@ -713,6 +1030,7 @@ func _execute_command(command: Dictionary) -> Dictionary:
 	for id: int in result.unit_ids:
 		if command.type == "move":
 			_artillery.cancel(_authoritative_units[id])
+			if acceptance_full_06 and command.mode == MovementSimulation.MoveMode.ATTACK: _acceptance_auto_units[id] = true
 			for weapon: RuntimeWeaponInstance in _authoritative_units[id].runtime_weapons:
 				if weapon.forced_emissions_remaining >= 0: weapon.clear_target()
 		_dirty_units[id] = true
@@ -723,6 +1041,10 @@ func _execute_command(command: Dictionary) -> Dictionary:
 			accepted.assign(result.unit_ids)
 			_queue_replication("_receive_move_targets", [accepted, _movement.move_targets(accepted)], sender)
 			_queue_replication("_receive_move_paths", [accepted, _movement.move_paths(accepted)], sender)
+			var modes: Array[int] = []
+			for id: int in accepted: modes.append(_movement._move_modes[id])
+			_queue_replication("_receive_move_modes", [accepted, modes], sender)
+			print("Move mode=%d group=%s accepted=%s" % [command.mode,command.group,accepted])
 	else:
 		if result.rejection.is_empty(): result.rejection = "no owned eligible units"
 		print("%s rejected: peer %d: %s" % [command.type.capitalize(), sender, result.rejection])
@@ -764,6 +1086,15 @@ func capture_replay_checkpoint() -> Dictionary:
 
 
 func _queue_replication(method: String, arguments: Array, peer_id: int = -1) -> void:
+	if method == "_receive_task_queues": return # Dedicated owner-only projection path; never generic broadcast.
+	if method == "_receive_command_notice":
+		# Private UI result: prohibit broadcast and recheck identity at delivery.
+		if peer_id <= 0 or arguments.size() != 1 or not arguments[0] is Dictionary: return
+		var notice: Dictionary = arguments[0]
+		if int(notice.get("_recipient_player_id", 0)) <= 0 or int(notice.get("_recipient_player_id", 0)) != _peer_players.get(peer_id, 0): return
+		var public_notice := {"command":notice.command, "reason":notice.reason, "unit_ids":notice.unit_ids.duplicate()}
+		_replication_queue.append({"method":method, "arguments":[public_notice], "peer_id":peer_id, "notice_player_id":notice._recipient_player_id})
+		return
 	if legacy_combat_fixture_enabled and method != "_receive_projectile_events":
 		_replication_queue.append({"method": method, "arguments": arguments.duplicate(true), "peer_id": peer_id})
 		return
@@ -775,6 +1106,19 @@ func _queue_replication(method: String, arguments: Array, peer_id: int = -1) -> 
 
 func _replication_arguments_for_peer(method: String, arguments: Array, peer_id: int) -> Array:
 	if not _peer_players.has(peer_id): return []
+	if method == "_receive_task_queues": return []
+	if method == "_receive_move_modes":
+		var ids: Array[int] = []
+		var modes: Array[int] = []
+		if arguments.size() != 2 or arguments[0].size() != arguments[1].size(): return []
+		for index: int in arguments[0].size():
+			var id: int = arguments[0][index]
+			if _authoritative_units.has(id) and _authoritative_units[id].owner_player_id == _peer_players[peer_id]:
+				ids.append(id)
+				modes.append(arguments[1][index])
+		return [ids,modes] if not ids.is_empty() else []
+	if method == "_receive_acceptance_explosion":
+		return acceptance_explosion_arguments(arguments) if acceptance_full_06 else []
 	# DB34 makes projectile motion public, without revealing source/impact identity.
 	if method == "_receive_projectile_events": return ProjectileProjection.batch(arguments)
 	if method == "_receive_weapon_fires": return []
@@ -784,27 +1128,53 @@ func _replication_arguments_for_peer(method: String, arguments: Array, peer_id: 
 			if _authoritative_units.has(structure.unit_id) and _authoritative_units[structure.unit_id].owner_player_id == _peer_players[peer_id]:
 				structures.append(structure)
 		return [structures] if not structures.is_empty() else []
+	if method == "_receive_unit_statuses":
+		var statuses: Array[Dictionary] = []
+		for structure: Dictionary in arguments[0]:
+			if not _unit_disclosed(int(structure.get("unit_id",0))): continue
+			var status := UnitStatusProjection.project(structure)
+			if not status.is_empty(): statuses.append(status)
+		return [statuses] if not statuses.is_empty() else []
 	if method == "_receive_unit_snapshot":
-		return arguments if int(arguments[0].team_id) == COMBAT_CONFIG.player_team_id else []
+		if arguments.size() != 1 or not arguments[0] is Dictionary or not arguments[0].get("unit_id") is int: return []
+		return arguments if _unit_disclosed(int(arguments[0].unit_id)) else []
 	if method in ["_receive_unit_positions","_receive_unit_orientations","_receive_unit_stops","_receive_move_targets","_receive_move_paths"]:
 		var ids: Array[int] = []
 		var values: Array = arguments[1].duplicate()
 		values.clear()
 		for index: int in arguments[0].size():
 			var id: int = arguments[0][index]
-			if _authoritative_units.has(id) and _authoritative_units[id].team_id == COMBAT_CONFIG.player_team_id:
+			if _unit_disclosed(id):
 				ids.append(id)
 				values.append(arguments[1][index])
 		return [ids,values] if not ids.is_empty() else []
 	if method == "_receive_unit_death":
-		return arguments if _authoritative_units.has(arguments[0]) and _authoritative_units[arguments[0]].team_id == COMBAT_CONFIG.player_team_id else []
+		return arguments if _unit_disclosed(arguments[0]) else []
 	return arguments
+
+static func acceptance_explosion_arguments(arguments: Array) -> Array:
+	if arguments.size() != 1 or not arguments[0] is Dictionary: return []
+	var event: Dictionary = arguments[0]
+	if not event.get("position") is Vector3 or not event.position.is_finite() or not ImpactDamageRules.number(event.get("radius"),0) or event.radius <= 0: return []
+	return [{"position":event.position,"radius":event.radius}]
+
+@rpc("authority","call_remote","reliable")
+func _receive_unit_statuses(statuses: Array) -> void:
+	if multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	for status: Dictionary in statuses: presentation.unit_status_received.emit(status)
+
+@rpc("authority","call_remote","reliable")
+func _receive_acceptance_explosion(event: Dictionary) -> void:
+	if not acceptance_full_06 or multiplayer.is_server() or multiplayer.get_remote_sender_id() != 1: return
+	var permitted := acceptance_explosion_arguments([event])
+	if not permitted.is_empty(): acceptance_explosion_received.emit(permitted[0])
 
 
 func _flush_replication() -> void:
 	var messages := _replication_queue
 	_replication_queue = []
 	for message: Dictionary in messages:
+		if message.method in ["_receive_command_notice","_receive_task_queues"] and _peer_players.get(message.peer_id, 0) != message.notice_player_id: continue
 		if multiplayer.get_peers().is_empty():
 			continue
 		if message.peer_id == -1:
@@ -825,7 +1195,24 @@ func _ensure_deployment_ready() -> bool:
 			if entry.config_id != "test.rifle": continue
 			var active_entry := entry.duplicate()
 			active_entry.definition = _weapon_presets[0]
+			if acceptance_06c:
+				active_entry.value_points = 5
+				active_entry.sortie_points = 5
+				active_entry.maximum_present = 8
 			config.catalog.append(active_entry)
+			if acceptance_06c:
+				var fixtures: Array[Dictionary] = [{"id":"test.editor.top","definition":_weapon_presets[1]},{"id":"test.editor.armor","definition":_weapon_presets[2]}]
+				if acceptance_full_06:
+					fixtures.append({"id":"test.editor.suppression","definition":_weapon_presets[3]})
+					fixtures.append({"id":"test.editor.modules","definition":_weapon_presets[4]})
+					fixtures.append({"id":"test.editor.manual","definition":_weapon_presets[5]})
+					fixtures.append({"id":"test.editor.mechanical","definition":_weapon_presets[6]})
+				for fixture: Dictionary in fixtures:
+					var test_entry := active_entry.duplicate()
+					test_entry.config_id = fixture.id
+					test_entry.definition = fixture.definition
+					config.catalog.append(test_entry)
+				continue
 			var mortar_entry := active_entry.duplicate()
 			mortar_entry.config_id = "test.mortar"
 			mortar_entry.definition = preload("res://data/units/db33_active_test_mortar.tres")

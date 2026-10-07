@@ -27,6 +27,44 @@ var sampling_failure_reason := ""
 var _sampled_mode := false
 var _sampled_halted := false
 var _sampled_end := NAN
+var _sampled_commands: Dictionary = {}
+
+func _command_maps() -> Array:
+	return [_targets,_paths,_path_indices,_attack_moves,_engaging,_reverse_moves,_final_yaws,_move_modes,_blocked_seconds]
+
+func capture_sampled_commands() -> void:
+	_sampled_commands.clear()
+	for id: int in _units:
+		_sampled_commands[id] = []
+		for map: Dictionary in _command_maps():
+			_sampled_commands[id].append({"present":map.has(id),"value":map.get(id)})
+
+# Rewind only the speculative route bookkeeping of this affected unit. The
+# frame supplies its actual event-time pose; no elapsed movement is repeated.
+func resample_unit(id: int,remaining: float,segment: Dictionary,at: float) -> void:
+	if not _units.has(id) or not _sampled_commands.has(id): return
+	var maps := _command_maps()
+	for index: int in maps.size():
+		var saved: Dictionary = _sampled_commands[id][index]
+		if saved.present: maps[index][id] = saved.value
+		else: maps[index].erase(id)
+	var unit := _units[id]
+	var position := unit.position
+	var yaw := unit.yaw
+	var multiplier := unit.personnel_speed_multiplier
+	unit.position = segment.start
+	unit.yaw = segment.yaw
+	unit.personnel_speed_multiplier = segment.speed_multiplier
+	# Recover route/stop/retry bookkeeping to the actual event, then save that
+	# checkpoint for subsequent events. Never replay member following here.
+	_advance(maxf(0.0,at-float(segment.at)),id,false)
+	_sampled_commands[id] = []
+	for map: Dictionary in maps:
+		_sampled_commands[id].append({"present":map.has(id),"value":map.get(id)})
+	unit.position = position
+	unit.yaw = yaw
+	unit.personnel_speed_multiplier = multiplier
+	_advance(remaining,id)
 
 
 func navigation_for(state: UnitState, dynamic: bool = true, minimum_width: float = 0.0) -> StaticNavigationGrid:
@@ -180,7 +218,7 @@ func _validate_target(target: Vector3) -> String:
 	return ""
 
 
-func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vector3, mode: int = MoveMode.BASIC, facing: Vector3 = Vector3.ZERO) -> Dictionary:
+func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vector3, mode: int = MoveMode.BASIC, facing: Vector3 = Vector3.ZERO, plan_only: bool = false) -> Dictionary:
 	if mode not in [MoveMode.BASIC, MoveMode.FAST, MoveMode.ATTACK, MoveMode.REVERSE]:
 		return {"rejection": "invalid movement mode", "unit_ids": []}
 	var rejection := _validate_target(target)
@@ -226,6 +264,7 @@ func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vecto
 	var accepted: Array[int] = []
 	var failed: Array[int] = []
 	var reserved: Array[Vector3] = []
+	var destinations := {}
 	for index: int in ids.size():
 		var unit_id := ids[index]
 		var destination := destination_center + side * (-half_width + index * spacing)
@@ -237,11 +276,13 @@ func request_group_move(unit_ids: Array[int], sender_peer_id: int, target: Vecto
 		if path.is_empty():
 			failed.append(unit_id)
 			continue
-		_assign_path(unit_id, path, mode)
-		_final_yaws[unit_id] = _units[unit_id].yaw if facing.is_zero_approx() and Vector2(target.x - center.x, target.z - center.z).is_zero_approx() else final_yaw
+		if not plan_only:
+			_assign_path(unit_id, path, mode)
+			_final_yaws[unit_id] = _units[unit_id].yaw if facing.is_zero_approx() and Vector2(target.x - center.x, target.z - center.z).is_zero_approx() else final_yaw
+		destinations[unit_id] = path[path.size() - 1]
 		accepted.append(unit_id)
-		reserved.append(_targets[unit_id])
-	return {"rejection": "no reachable destinations" if accepted.is_empty() else "", "unit_ids": accepted, "failed_ids": failed}
+		reserved.append(path[path.size() - 1])
+	return {"rejection": "no reachable destinations" if accepted.is_empty() else "", "unit_ids": accepted, "failed_ids": failed, "destinations": destinations, "final_yaw":final_yaw}
 
 
 func move_targets(unit_ids: Array[int]) -> Array[Vector3]:
@@ -275,6 +316,7 @@ func advance_sampled(start: float) -> Dictionary:
 		sampling_failure_reason = "movement_sample_clock_mismatch"
 		return {"changed":{},"motion":null,"velocities":{},"reason":sampling_failure_reason}
 	_sampled_mode = true
+	capture_sampled_commands()
 	var before := ProjectileUnitMotion.capture(_units)
 	var anchors := {}
 	for unit: UnitState in _units.values(): anchors[unit.unit_id] = unit.position
@@ -294,9 +336,10 @@ func advance_sampled(start: float) -> Dictionary:
 	return {"changed":changed,"motion":motion,"velocities":velocities,"reason":sampling_failure_reason}
 
 
-func _advance(delta: float) -> Dictionary[int, Vector3]:
+func _advance(delta: float,only_id: int = 0,follow_members: bool = true) -> Dictionary[int, Vector3]:
 	var changed: Dictionary[int, Vector3] = {}
 	for id: int in attack_facing_requests:
+		if only_id > 0 and id != only_id: continue
 		if _units.has(id) and not _targets.has(id):
 			var previous := _units[id].yaw
 			_turn(_units[id],attack_facing_requests[id],delta)
@@ -304,6 +347,7 @@ func _advance(delta: float) -> Dictionary[int, Vector3]:
 	var ordered := _targets.keys()
 	ordered.sort()
 	for unit_id: int in ordered:
+		if only_id > 0 and unit_id != only_id: continue
 		if _engaging.has(unit_id):
 			continue
 		var state := _units[unit_id]
@@ -367,6 +411,8 @@ func _advance(delta: float) -> Dictionary[int, Vector3]:
 			if absf(wrapf(_final_yaws.get(unit_id, state.yaw) - state.yaw, -PI, PI)) < 0.00001:
 				_clear_move(unit_id)
 	for state: UnitState in _units.values():
+		if not follow_members: break
+		if only_id > 0 and state.unit_id != only_id: continue
 		state.advance_members(delta)
 	return changed
 

@@ -132,6 +132,11 @@ func run() -> void:
 	world._on_unit_move_targets_received(route_ids,route_targets)
 	world._on_unit_move_paths_received(route_ids,route_paths)
 	var path: MeshInstance3D = world._movement_paths[9001]
+	var colors: Array[Color] = [Color.WHITE,Color.BLUE,Color.YELLOW]
+	for mode: int in 3:
+		var modes: Array[int] = [mode]
+		feed.unit_move_modes_received.emit(route_ids,modes)
+		check(path.material_override.albedo_color == colors[mode] and world._route_points[9001] == route,"owner mode reception colors existing path without erasing route")
 	var route_stops: Array[Vector3] = [mortar.position]
 	world._on_unit_stops_received(route_ids,route_stops)
 	check(not path.visible and not world._movement_paths.has(9001) and not world._move_targets.has(9001) and not world._route_points.has(9001) and not world._route_progress.has(9001),"existing stop reception immediately hides indicator and clears every route cache")

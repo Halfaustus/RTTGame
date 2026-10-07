@@ -1,0 +1,25 @@
+extends "res://tests/db29_combat_timeline_test.gd"
+func run() -> void:
+	for name: String in ["suppression","modules"]:
+		var unit: UnitDefinition = load("res://data/units/acceptance_06c_%s.tres" % name)
+		check(unit != null and unit.spatial_valid() and unit.configuration_source.begins_with("test_only:rtt_unit_editor:"),"editor ready "+name)
+		var ammo: AmmoDefinition = unit.weapon_allocations[0].definition.ammo_definitions[0]
+		check(ammo.nominal_damage == 0,"zero damage stimulus "+name)
+		check(ammo.suppression == (320 if name == "suppression" else 0) and ammo.module_damage == (100 if name == "modules" else 0),"explicit independent stimulus "+name)
+	var manager = load("res://scripts/networking/network_manager.gd").new()
+	root.add_child(manager)
+	check(manager.configure_active_test_map() and manager.configure_acceptance_06c(true),"explicit full acceptance opt-in")
+	check(manager._movement._config.units_per_peer == 7 and manager._weapon_presets.size() == 7,"seven owned test objects per client")
+	manager._initialize_rebels()
+	check(manager._ensure_deployment_ready() and manager.deployment._config.catalog.size() == 7,"seven legal deployment choices")
+	manager.timeline.begin_tick()
+	manager.timeline.enter_phase("session")
+	manager._apply_peer_join(42)
+	check(manager._authoritative_units.size() == 10 and manager._authoritative_units[7].is_armed() and manager._authoritative_units[8].is_armed(),"actual D/E shooters spawned")
+	manager._apply_peer_join(43)
+	check(manager._authoritative_units.size() == 17 and manager._authoritative_units[13].unit_type() == UnitDefinition.UnitType.ARMORED_VEHICLE and manager._authoritative_units[14].is_armed(),"both clients receive all seven objects at legal spawn points")
+	manager.timeline.enter_phase("replication")
+	manager.timeline.finish_tick()
+	manager.free()
+	print("06 FULL SETUP: %d checks, %d failures" % [checks,failures])
+	quit(0 if failures == 0 else 1)

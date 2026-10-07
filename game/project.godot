@@ -21,8 +21,7 @@ NetworkManager="*uid://b8w150yocr8jx"
 
 [display]
 
-window/stretch/mode="canvas_items"
-window/stretch/aspect="expand"
+window/stretch/mode="disabled"
 
 [physics]
 

@@ -67,6 +67,10 @@ static func select(weapon: RuntimeWeaponInstance, inputs: Dictionary,sample: Dic
 		var score := expected_damage(ammo,penetration(ammo,distance),armor,reduction,weapon.definition.reduction_ignore)
 		# A missing contender cannot silently lose the ranking to a known one.
 		if not is_finite(score): return {"reason":"selection_configuration_missing"}
+		if sample.get("overpenetration_enabled",false) and ammo.damage_type == "kinetic" and ammo.explosion_radius_m == 0:
+			var over := KineticOverpenetration.preview(state,origin,target_position,float(sample.get("target_yaw",state.yaw)),penetration(ammo,distance),armor)
+			if not over.ok: return {"reason":"selection_configuration_missing"}
+			if over.continues: score *= KineticOverpenetration.HEALTH_FRACTION
 		if score > best_damage or (score == best_damage and ammo.ammo_id == weapon.fire_state.last_ammo_id):
 			best = ammo
 			best_damage = score

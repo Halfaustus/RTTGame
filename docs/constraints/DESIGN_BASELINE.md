@@ -1,6 +1,6 @@
 # RTTGame 设计基线
 
-基线标识：DB-2026-10-06-40。状态：已确认规则汇编。日期：2026-10-06（北京时间）。当前新增0.5G按距离选速及非直射DATA初速边界；具体规则见第18节。
+基线标识：DB-2026-10-07-41。状态：已确认规则汇编。日期：2026-10-07（北京时间）。有效弹道与时序见第18节；直射最近存活成员规则见第9节。
 
 ## 0 文档职责与范围
 
@@ -12,7 +12,7 @@
 
 本文及所属正文只维护现行规则、明确待定项和未解决冲突。冲突与缺失设计统一见[第22节](design/PENDING_DECISIONS.md#section-22)，不靠另一份正文、历史记录或通过的测试自动裁决。术语与状态隔离统一见[第24节](design/UNIT_CONFIGURATION.md#section-24)。
 
-`docs/RTTGame_DESIGN_PRINCIPLES.md`与`docs/DEVELOPMENT_CONTEXT.md`当前未找到；不重建其内容或授权。现存自主设计复核清单仅供人工查证，不能替代本基线或HANDOFF；本轮没有新增自主游戏设计授权，不修改清单。
+`docs/RTTGame_DESIGN_PRINCIPLES.md`当前未找到，不重建其内容或授权。[DEVELOPMENT_CONTEXT.md](../DEVELOPMENT_CONTEXT.md)已获用户授权创建，仅记录核验的当前临时配置，不重建缺失历史或充当规则／授权来源。现存自主设计复核清单仅供人工查证，不能替代本基线或HANDOFF；本轮没有新增自主游戏设计授权，不修改清单。
 
 ## 正文目录
 
@@ -44,7 +44,7 @@
 
 技术接口仍分别维护：[弹丸C类工程契约](PROJECTILE_SIMULATION_C_DESIGN.md)、[弹丸公开载荷](PROJECTILE_VISIBILITY_CONTRACT.md)、[回放格式](REPLAY_FORMAT_V1.md)、[录制](REPLAY_RECORDING.md)、[播放](REPLAY_PLAYBACK.md)。其中工程授权与通用规则的未统一项列于第22节，不能因移动文档而撤销既有授权。
 
-[未来开发规划](../DEVELOPMENT_ROADMAP.md)组织工作依赖、范围和交付门槛，不定义新玩法，不替代当前阶段授权。
+[未来开发规划](../../DEVELOPMENT_ROADMAP.md)组织工作依赖、范围和交付门槛，不定义新玩法，不替代当前阶段授权。
 
 ## 原章节定位
 

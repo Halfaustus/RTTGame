@@ -27,6 +27,7 @@ enum TargetType { INFANTRY, GROUND_VEHICLE, HELICOPTER, FIXED_WING, FORTIFICATIO
 @export var temporary_fields: Array[String] = []
 @export var mechanical_loading := false
 @export var reduction_ignore := -1.0
+@export var attack_top := false # Existing confirmed weapon tag; not guidance.
 @export var projectile: ProjectileDefinition
 # Old isolated prototype compatibility only; runtime aiming never reads these.
 @export var damage: float = 10.0

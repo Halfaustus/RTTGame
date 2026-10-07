@@ -9,6 +9,9 @@ func _enter_tree() -> void:
 	if not NetworkManager.configure_active_test_map():
 		push_error("Active TEST ONLY battlefield initialization failed")
 		get_tree().quit(1)
+	if ("--acceptance-06c" in OS.get_cmdline_user_args() or "--acceptance-06" in OS.get_cmdline_user_args()) and not NetworkManager.configure_acceptance_06c("--acceptance-06" in OS.get_cmdline_user_args()):
+		push_error("06C acceptance fixtures rejected")
+		get_tree().quit(1)
 
 func _ready() -> void:
 	if "--server" in OS.get_cmdline_user_args():

@@ -11,6 +11,7 @@ var health: float = 100.0
 var unit_type: int = UnitDefinition.UnitType.INFANTRY
 var _nose: MeshInstance3D
 var _owner_color := Color.TRANSPARENT
+var legacy_model_binding := false # Frozen Replay v1 presentation only.
 
 func display_owner_color(color: Color) -> void:
 	_owner_color = color
@@ -26,6 +27,12 @@ func display_unit_type(kind: int) -> void:
 	unit_type = kind
 	if not is_node_ready():
 		return
+	if kind == UnitDefinition.UnitType.INFANTRY and not legacy_model_binding:
+		$MeshInstance3D.mesh = null
+		$MeshInstance3D.visible = false
+		if _nose != null: _nose.visible = false
+		return
+	$MeshInstance3D.visible = true
 	if _nose == null:
 		_nose = _bar(Color(1.0, 0.9, 0.15), Vector3(0.3, 0.08, 0.18))
 		_nose.name = "FrontMarker"
@@ -35,7 +42,7 @@ func display_unit_type(kind: int) -> void:
 	if kind == UnitDefinition.UnitType.ARMORED_VEHICLE:
 		var box := BoxMesh.new()
 		# Rotated corners stay inside the existing one-metre navigation footprint.
-		box.size = Vector3(0.6, 0.5, 0.8)
+		box.size = Vector3(0.6, 0.5 if legacy_model_binding else 0.08, 0.8)
 		$MeshInstance3D.mesh = box
 	else:
 		var sphere := SphereMesh.new()

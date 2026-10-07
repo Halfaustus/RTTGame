@@ -2,17 +2,23 @@ extends "res://tests/db29_projectile_test.gd"
 
 func run() -> void:
 	var results: Array[Dictionary] = []
+	var measurement_directory := "res://../tmp/cleanup-07/m252-" + str(Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(measurement_directory))
 	for requested_range in [100.0,150.0,200.0,250.0,300.0,350.0,500.0,900.0,1200.0,1500.0,1800.0]:
 		var model = load("res://scripts/networking/network_manager.gd").new()
 		root.add_child(model)
 		check(model.configure_active_test_map(),"activity navigation initialized")
 		var expanded: bool = requested_range>400
 		if expanded:
-			# Measurement-only boundary extension. Same map definitions, DATA,
-			# commands, FiringFrame and projectile consumer; no runtime file edit.
+			# Measurement-only boundary extension. Persist the isolated configuration
+			# outside production so settlement has its real path and content hash.
 			var config: MovementConfig = model._movement._config.duplicate()
 			config.resource_name="TEST ONLY M252 maximum range measurement"
 			config.maximum_xz.y=1700
+			var config_path := measurement_directory.path_join("range-%d.tres" % requested_range)
+			check(ResourceSaver.save(config,config_path) == OK,"measurement configuration saved outside production")
+			config = load(config_path)
+			check(config != null and not config.resource_path.is_empty(),"measurement configuration has settlement identity")
 			model._movement=MovementSimulation.new(config)
 			check(model._movement.initialize_navigation(),"measurement-only range fits navigation")
 		check(model._ensure_deployment_ready(),"actual deployment configured")
@@ -58,7 +64,7 @@ func run() -> void:
 			print("M252 %.0fm | %.3fm/s | high %.4fdeg | apex %.3fm | flight %.5fs | low %.5fs | expanded=%s" % [requested_range,velocity.length(),rad_to_deg(atan2(velocity.y,horizontal)),float(launch.position.y)+velocity.y*velocity.y/20,flight_time,nominal_low.seconds,expanded])
 		if model._projectiles!=null: model._projectiles.collision.close()
 		model.free()
-	var output:=FileAccess.open("res://../tmp/05g/m252-measurements.json",FileAccess.WRITE)
+	var output:=FileAccess.open(measurement_directory.path_join("measurements.json"),FileAccess.WRITE)
 	output.store_string(JSON.stringify({"weapon":"W_M252","ammo":"A_M252_HE","gravity":10,"random_seed":50506,"results":results},"  "))
 	output.close()
 	print("M252 actual chain measurements: %d checks, %d failures" % [checks,failures])

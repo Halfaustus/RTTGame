@@ -5,7 +5,7 @@ extends RefCounted
 var tasks: Dictionary = {}
 var data := ConfirmedGameData.new()
 
-func submit(unit: UnitState,point: Vector3,count: int,aiming: AimingSimulation,movement: MovementSimulation) -> String:
+func submit(unit: UnitState,point: Vector3,count: int,aiming: AimingSimulation,movement: MovementSimulation,validate_only: bool = false) -> String:
 	if not point.is_finite() or count not in [1,3,-1]: return "invalid_artillery_request"
 	var ground_error := movement._validate_target(point)
 	if not ground_error.is_empty(): return ground_error
@@ -28,13 +28,14 @@ func submit(unit: UnitState,point: Vector3,count: int,aiming: AimingSimulation,m
 			if not solution.valid: return solution.reason
 		eligible.append(weapon)
 	if eligible.is_empty(): return "no_artillery_weapon"
+	if validate_only: return ""
 	movement.request_stop([unit.unit_id],unit.owner_peer_id)
 	cancel(unit)
 	for weapon: RuntimeWeaponInstance in eligible:
 		weapon.bind_target(AttackTarget.ground(point),true)
 		var selection := AmmoSelection.ground_selection(weapon)
 		var available := int(weapon.inventory[selection.ammo.ammo_id])/weapon.definition.consumption_per_projectile
-		tasks[weapon.instance_id] = {"remaining":available if count < 0 else mini(count,available),"minimum":data.number(data.record("Weapons",weapon.definition.definition_id),"Min_Range_m"),"ammo":selection.ammo,"weapon":weakref(weapon)}
+		tasks[weapon.instance_id] = {"remaining":available if count < 0 else count,"minimum":data.number(data.record("Weapons",weapon.definition.definition_id),"Min_Range_m"),"ammo":selection.ammo,"weapon":weakref(weapon)}
 		if unit.position.distance_to(point) > weapon.definition.range_m:
 			var source := weapon.world_position()
 			var destination := point+(source-point).normalized()*weapon.definition.range_m-(source-unit.position)

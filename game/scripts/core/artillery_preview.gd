@@ -7,6 +7,7 @@ const HALF_WIDTH := 0.05
 var data := ConfirmedGameData.new()
 var _definitions: Dictionary = {}
 var descriptions: Array[Dictionary] = []
+var test_definitions: Dictionary = {} # Explicit acceptance mode only; local definitions, not RPC authority.
 
 func _init() -> void:
 	mesh = ImmediateMesh.new()
@@ -22,9 +23,12 @@ func _init() -> void:
 func describe(weapon: Dictionary,point: Vector3,indirect: bool = true) -> Dictionary:
 	var id := str(weapon.get("definition_id",""))
 	var record := data.record("Weapons",id)
-	if record.is_empty() or (record.get("Class","") == "迫击炮") != indirect: return {}
+	var test_definition: WeaponDefinition = test_definitions.get(id)
+	if record.is_empty():
+		if test_definition == null or indirect: return {}
+	elif (record.get("Class","") == "迫击炮") != indirect: return {}
 	if not weapon.get("weapon_position") is Vector3 or not weapon.get("muzzle_position") is Vector3 or not point.is_finite(): return {}
-	if not _definitions.has(id): _definitions[id] = data.weapon(id)
+	if not _definitions.has(id): _definitions[id] = test_definition if record.is_empty() else data.weapon(id)
 	var definition: WeaponDefinition = _definitions[id]
 	if definition == null: return {}
 	var distance: float = weapon.weapon_position.distance_to(point)

@@ -148,7 +148,9 @@ func run() -> void:
 	check(rejected.unit_ids.is_empty(),"foreign player cannot issue fire for owned unit")
 	rejected = network._execute_command({"type":"ground_fire","unit_ids":[8000],"target":Vector3(NAN,0,0),"peer_id":42,"player_id":1})
 	check(rejected.unit_ids.is_empty(),"invalid fire location rejected before target mutation")
-	var cannon := UnitState.new(8001,42,Vector3(20,0.5,100))
+	# TEST ONLY command fixture: keep the mortar out of the rifle's muzzle/body.
+	# Real friendly collision now settles explosion damage; overlap is not safe.
+	var cannon := UnitState.new(8001,42,Vector3(40,0.5,100))
 	cannon.configure(1,preload("res://data/units/db33_active_test_mortar.tres"))
 	cannon.owner_player_id = 1
 	network._authoritative_units[8001] = cannon
@@ -197,6 +199,10 @@ func run() -> void:
 	world._handle_world_input(event)
 	check(world._fire_mode == "artillery","Esc menu preserves T interaction")
 	event.keycode = KEY_E
+	world._handle_world_input(event)
+	check(world._fire_mode == "artillery","menu blocks E world input until resume")
+	var resume: Button = world._menu.find_child("ResumeGame",true,false)
+	resume.pressed.emit()
 	world._handle_world_input(event)
 	check(world._fire_mode.is_empty() and world._pending_actions.is_empty(),"E exits T only without clearing tasks")
 	world._fire_mode = "artillery"

@@ -120,7 +120,11 @@ static func _emit(fire: FireSimulation,weapon: RuntimeWeaponInstance,at: float,a
 	if (indirect and not ammo.distance_selected_launch) or (not indirect and (ammo.distance_selected_launch or not is_finite(ammo.initial_speed_mps) or ammo.initial_speed_mps <= 0.0)):
 		state.reason = "projectile_configuration_missing"
 		return {}
-	var inputs: Dictionary = aiming.inputs.get(weapon.owner_state().unit_id,{})
+	var inputs: Dictionary = aiming.inputs.get(weapon.owner_state().unit_id,{}).duplicate()
+	var personnel: InfantrySuppressionState = weapon.owner_state().suppression
+	if personnel != null:
+		personnel.advance_to(at)
+		inputs.spread_multiplier = float(inputs.get("personnel_base_spread",1.0))*personnel.modifiers().spread_multiplier
 	var position: Vector3 = sample.get("position",weapon.world_position())
 	var yaw: float = sample.get("yaw",weapon.world_yaw())
 	var origin := DirectBallistics.sampled_muzzle(weapon,position,yaw,inputs)
@@ -163,6 +167,8 @@ static func _emit(fire: FireSimulation,weapon: RuntimeWeaponInstance,at: float,a
 		state.reason = "friendly_blocked"
 		return {}
 	var event := {"event_id":"%s:%s" % [weapon.instance_id,state.emission_count+1],"emission_order":fire.emission_order+1,"time_seconds":at,"unit_id":weapon.owner_state().unit_id,"owner_player_id":weapon.owner_state().owner_player_id,"weapon_instance_id":weapon.instance_id,"position":origin,"velocity":solution.velocity,"ammo":ammo,"consumed":count,"ignore_house_id":int(inputs.get("house_id",0)),"ignore_target_house_id":int(aiming.inputs.get(weapon.target.unit_id,{}).get("house_id",0))}
+	event.weapon_values = {"reduction_ignore":definition.reduction_ignore,
+		"attack_top":null if definition.attack_top and definition.ammo_definitions.size() > 1 else definition.attack_top}
 	# All configuration, geometry and permissions checked before atomic debit.
 	weapon.consume(ammo.ammo_id,count)
 	weapon.pending_rounds -= count

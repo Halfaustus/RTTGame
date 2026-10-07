@@ -12,7 +12,7 @@
 
 ## Autonomous design authorization review maintenance
 
-docs/AUTONOMOUS_DESIGN_REVIEW.md is a separate checklist for manual review of autonomous design authorization.
+AUTONOMOUS_DESIGN_REVIEW.md at the repository root is a separate checklist for manual review of autonomous design authorization.
 
 Whenever the user explicitly states that Codex may design autonomously, automatically update the checklist to record the source, scope, limits and decisions made under that authorization. If no decisions have been made at the time of authorization, mark them as not yet designed; add decisions actually made within the same authorized task when delivering the task.
 
@@ -110,6 +110,16 @@ Network messages should use explicit and stable data structures.
 
 ## Gameplay data
 
+### Third-party research and originality
+
+- Broken Arrow materials are read-only research inputs in a logically isolated Reference Layer. They are not reusable or publishable project assets. Production code, configuration and resources must be independently authored from this project's requirements.
+- Do not copy, translate, convert, rename or lightly alter third-party code, decompiled implementation, assets, text, complete databases/value tables, internal identifiers, map deployments, timestamps, event sequences or mission trigger chains into production. Renaming, random perturbation, percentage adjustment, scaling and unit conversion do not establish originality.
+- Use statistical observations and abstract principles, then this project's goals, independent mathematical models and independently generated parameters. Record this derivation and provenance. Public facts may be distinguished from the reference game's particular expression and parameter combinations. Missing provenance is not approval.
+- Research missions through pressure, decisions and resource pacing; independently design terrain, objectives, decision paths, stage order, threats, forces, reinforcement, victory conditions and transitions. Reduce implementation references to functional requirements before independently designing inputs, outputs, algorithms, structures and tests.
+- Before producing content influenced by third-party references, check for copied data; renamed counterparts; lightly adjusted values; retained coordinates/times/events; copied mission/trigger structure; reused code structure/internal names; original text; ability to reconstruct substantial original content; an explainable independent process; and whether the result can be derived after removing all original reference data. Any of the first eight findings prohibits production use; failure of the last requires rebuilding the independent model.
+- Assess each research use as LOW (abstract principles/public facts/independent implementation), MEDIUM (specific references substantially abstracted and remodelled), or HIGH (raw parameters, direct mappings, mission/script structure or close implementation). HIGH results must become abstract requirements before independent regeneration. Uncertain provenance remains research-only. Requests for fidelity or internal use do not waive these constraints.
+- For visibly reference-inspired outputs, report observation, abstract principle, original proposal and self-check. Do not directly copy/export/convert Reference Layer files into production; exclude local raw research from publication and version-control delivery. Research may influence ideas, not serve as the resulting product assets.
+
 Prefer data-driven definitions over hard-coded unit statistics.
 
 Unit, weapon, armor and faction definitions should be stored separately from runtime behavior.
@@ -117,6 +127,8 @@ Unit, weapon, armor and faction definitions should be stored separately from run
 Do not hard-code balance values throughout gameplay scripts.
 
 ## Development process
+
+Use root TASK_WORKFLOW.md, TASK_TEMPLATE.md and TASKS.md for task preparation and tracking; detailed cards live in docs/tasks/. Read the actual current task, HANDOFF, relevant baseline modules and applicable DATA before execution. Record DoR and authorization separately: Dev Ready does not authorize implementation or lift a pause. Register out-of-scope issues and dependencies, review relevant baseline/DATA changes, and synchronize verification evidence, TASKS and HANDOFF before closing a task. These workflow files do not override these constraints or authorize design decisions.
 
 Before implementing a non-trivial feature:
 
@@ -190,10 +202,17 @@ separately. Successful serialization tests are not full replay recording or play
 
 ## Verification and reporting conventions
 
+### Required form of manual review
+
+- Unless the user explicitly specifies another form, every manual review, inspection, recheck or acceptance must be provided as a complete setup with two real clients and an independent authoritative server. Provide the setup/start/stop instructions, a checklist with actions and expected results, actual status, and evidence for client A, client B and the server.
+- Do not simplify this form for any reason. An isolated inspector, single client, local simulation, headless simulation test or static/documentation check cannot replace any part of the required manual review. These may only be supplementary evidence.
+- If the complete setup, necessary test objects, observability or verification entrypoints are unavailable, record the affected manual items as blocked/not verified and prepare the missing requirements within the authorized scope. Do not substitute a simpler form or claim acceptance. Only an explicit user instruction specifying another form changes this requirement; do not infer an exception from urgency, cost, technical difficulty or earlier tools.
+- This governs the form of manual review; it does not automatically require manual review for every minor version, authorize gameplay outside the current task, or authorize the agent to launch clients without an explicit client-test request. When the user requests manual review without specifying its form, provide the complete two-client-plus-server form and checklist.
+
 The following conventions replace the previous requirement to "output only a manual verification checklist, verification evidence and start/stop commands in each round."
 Minor versions refer to stages such as 0.4A and 0.4B; major versions refer to complete versions such as 0.4 and 0.5.
 
-- Minor-version development requires only relevant automatic verification and necessary regression checks. Manual acceptance is not required; do not output a manual verification checklist or detailed start/stop commands.
+- Minor-version development requires only relevant automatic verification and necessary regression checks by default. Manual acceptance is not required by default; omit a manual verification checklist and detailed start/stop commands unless the user requests manual review. If requested, follow "Required form of manual review" above.
 - Perform manual acceptance at the end of each major version. At that point, provide a complete manual verification checklist (steps, expected results and actual status), verification evidence and exact start/stop commands.
 - The final response for a minor version only needs a brief summary of completed work, automatic verification results, known limitations and the next step.
 - Record automatic verification and manual acceptance separately. If manual acceptance has not been performed, do not claim that it passed or that the entire major version has been accepted; passing automatic verification does not mean passing manual acceptance.
@@ -201,6 +220,8 @@ Minor versions refer to stages such as 0.4A and 0.4B; major versions refer to co
 - "Submit a minor-version summary" means outputting a summary only; it does not authorize Git commit or push.
 
 ## Design baseline
+
+- Default to the latest confirmed effective baseline in docs/constraints/DESIGN_BASELINE.md and its explicitly listed normative modules, unless the user explicitly designates a stable version. Record any designated version and scope; do not infer a baseline from drafts, larger identifiers, chat summaries or unavailable historical files. Review affected tasks when the baseline changes. Version selection does not grant implementation authorization or lift a pause.
 
 - Validate capabilities, command eligibility and configuration against the actual baseline and explicit authorization. Report missing implementations; do not silently grant unsupported capabilities.
 

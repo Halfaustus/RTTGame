@@ -39,6 +39,10 @@ var runtime_weapons: Array[RuntimeWeaponInstance] = []
 var unassigned_inventory: Dictionary = {}
 var _formation_members: Array[int] = []
 var profile: Dictionary = {}
+var suppression: InfantrySuppressionState
+var vehicle_modules: VehicleModuleState
+var personnel_speed_multiplier := 1.0
+var personnel_vision_multiplier := 1.0
 var squad_channels: SquadWeaponChannels
 var armament_configuration_reason := "eligible"
 var member_health: PackedFloat32Array:
@@ -169,7 +173,7 @@ func advance_members(delta: float) -> bool:
 		if member.formation_slot < 0: continue
 		if not profile.is_empty(): profile["soldier_follow_updates"] = profile.get("soldier_follow_updates",0) + 1
 		var target := position + formation_slots[member.formation_slot].rotated(Vector3.UP,yaw)
-		var next := member.position.move_toward(target,definition.unhardened_speed * definition.member_follow_speed_multiplier * delta)
+		var next := member.position.move_toward(target,definition.unhardened_speed * personnel_speed_multiplier * definition.member_follow_speed_multiplier * delta)
 		changed = changed or next != member.position
 		member.position = next
 	return changed
@@ -186,6 +190,23 @@ func apply_prototype_damage(amount: float) -> void:
 			break
 	_reassign_formation()
 
+# Authoritative simulation entry; the caller selects a stable member explicitly.
+# This never uses the compatibility total-HP setter or spills into another person.
+func apply_member_damage(member_id: int,amount: float) -> Dictionary:
+	if unit_type() != UnitDefinition.UnitType.INFANTRY or not is_finite(amount) or amount < 0:
+		return {"ok":false,"reason":"member_damage_invalid"}
+	var selected: SoldierState
+	for member: SoldierState in members:
+		if member.member_id == member_id:
+			if selected != null: return {"ok":false,"reason":"member_identity_ambiguous"}
+			selected = member
+	if selected == null or not is_finite(selected.health) or selected.health <= 0 or selected.health > SoldierState.MAXIMUM_HEALTH:
+		return {"ok":false,"reason":"member_not_living"}
+	var previous := selected.health
+	selected.health = maxf(0.0,previous-amount) # Existing event-driven operator/stock update.
+	return {"ok":true,"unit_id":unit_id,"member_id":member_id,"health_before":previous,
+		"health_after":selected.health,"damage_applied":previous-selected.health,"member_died":selected.health == 0.0,"unit_died":health == 0.0}
+
 
 func structure_snapshot() -> Dictionary:
 	if not profile.is_empty(): profile["internal_state_serializations"] = profile.get("internal_state_serializations",0) + 1
@@ -195,7 +216,13 @@ func structure_snapshot() -> Dictionary:
 	for mount: WeaponMountState in mounts: attachments.append(mount.snapshot(yaw))
 	var armament: Array[Dictionary] = []
 	for instance: RuntimeWeaponInstance in runtime_weapons: armament.append(instance.snapshot())
-	return {"schema_version":1,"unit_id":unit_id,"members":people,"mounts":attachments,"weapons":armament}
+	var result := {"schema_version":1,"unit_id":unit_id,"members":people,"mounts":attachments,"weapons":armament}
+	if suppression != null:
+		result.personnel = {"state":["calm","panic","disabled","dead"][suppression.personnel_state()],"ratio":suppression.ratio()}
+	if vehicle_modules != null:
+		result.modules = vehicle_modules.levels.duplicate()
+		result.personnel = {"state":["calm","panic","disabled"][vehicle_modules.levels[VehicleModuleState.Module.PERSONNEL]]}
+	return result
 
 
 # Query actual member positions directly; the legacy squad box is not a filter.
@@ -291,11 +318,11 @@ func unassigned_weapon_stock() -> Array[Dictionary]:
 
 
 func reverse_speed_on(hardened: bool) -> float:
-	return definition.hardened_reverse_speed if hardened else definition.unhardened_reverse_speed
+	return (definition.hardened_reverse_speed if hardened else definition.unhardened_reverse_speed)*personnel_speed_multiplier
 
 
 func speed_on(hardened: bool, fallback: float) -> float:
-	return definition.speed_on(hardened) if definition != null else fallback
+	return (definition.speed_on(hardened) if definition != null else fallback)*personnel_speed_multiplier
 
 
 func unit_type() -> int:

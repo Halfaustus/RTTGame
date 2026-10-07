@@ -65,7 +65,7 @@ func configure(start: float,before: Dictionary,after: Dictionary) -> bool:
 	ready = true
 	return true
 
-func sweep(start: Vector3,end: Vector3,at: float,duration: float,source_unit: int,limit: float = 1.0) -> Dictionary:
+func sweep(start: Vector3,end: Vector3,at: float,duration: float,source_unit: int,limit: float = 1.0,ignored: Dictionary = {}) -> Dictionary:
 	profile.queries += 1
 	if not ready: return {"failure":failure_reason if not failure_reason.is_empty() else "unit_motion_unconfigured"}
 	var h := GravityBallistics.STEP_SECONDS
@@ -76,15 +76,15 @@ func sweep(start: Vector3,end: Vector3,at: float,duration: float,source_unit: in
 	var candidates := {}
 	for cell: Vector3i in _covered(bounds):
 		for id: Variant in cells.get(cell,[]):
-			if int(id) != source_unit: candidates[id] = true
+			if int(id) != source_unit and not ignored.has(id): candidates[id] = true
 	var best := {}
 	for id: Variant in candidates:
 		var record: Dictionary = records[id]
 		profile.candidates += 1
 		if not _overlaps(bounds,record.bounds): continue
 		profile.precise_tests += 1
-		var t0 := clampf((at-time_seconds)/h,0.0,1.0)
-		var t1 := clampf((at+duration*limit-time_seconds)/h,0.0,1.0)
+		var t0 := record_fraction(record,at)
+		var t1 := record_fraction(record,at+duration*limit)
 		var hit := _changing_box(record,start,shortened,t0,t1) if record.changing else _box(record.inverse*(start-record.start.lerp(record.end,t0)),record.inverse*(shortened-record.start.lerp(record.end,t1)),record.extents)
 		if hit.is_empty(): continue
 		hit.fraction *= limit
@@ -93,6 +93,34 @@ func sweep(start: Vector3,end: Vector3,at: float,duration: float,source_unit: in
 		hit.merge({"object_id":record.object_id,"object_category":"unit","unit_id":record.unit_id,"unit_type":record.unit_type,"team_id":record.team_id})
 		if best.is_empty() or float(hit.fraction)*duration < float(best.fraction)*duration-TIME_TOLERANCE or (absf(float(hit.fraction-best.fraction))*duration <= TIME_TOLERANCE and hit.object_id < best.object_id): best = hit
 	return best
+
+# Explicit event-driven removal, preserving the configured interval and other
+# shared samples. The source unit's already-fired projectiles remain independent.
+func remove_unit(id: int) -> void:
+	if not records.has(id): return
+	for cell: Vector3i in _covered(records[id].bounds):
+		if not cells.has(cell): continue
+		cells[cell].erase(id)
+		if cells[cell].is_empty(): cells.erase(cell)
+	records.erase(id)
+
+func record_fraction(record: Dictionary,at: float) -> float:
+	var start: float = record.get("start_time",time_seconds)
+	var duration := time_seconds+GravityBallistics.STEP_SECONDS-start
+	return clampf((at-start)/duration,0.0,1.0) if duration > 0 else 1.0
+
+func replace_unit(id: int,at: float,before: Dictionary,after: Dictionary) -> bool:
+	var sample := ProjectileUnitMotion.new()
+	if not sample.configure(at,before,after): return false
+	remove_unit(id)
+	if not sample.records.has(id): return true
+	var record: Dictionary = sample.records[id]
+	record.start_time = at
+	records[id] = record
+	for cell: Vector3i in _covered(record.bounds):
+		if not cells.has(cell): cells[cell] = []
+		cells[cell].append(id)
+	return true
 
 static func _changing_box(record: Dictionary,start: Vector3,end: Vector3,t0: float,t1: float) -> Dictionary:
 	# Each local segment uses its midpoint shape. Padding covers the maximum

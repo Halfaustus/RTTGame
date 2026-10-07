@@ -17,8 +17,15 @@ var distance_selected_launch := false # Adapter provenance from existing Weapon 
 @export var test_curve: String = "" # Explicit temporary evaluator, never a formal curve.
 @export var test_log_shape := -1.0
 var confirmed_decay_coefficient := NAN # Cached implementation value, not DATA.
+var explosion_radius_squared := NAN
+var inverse_explosion_radius_squared := NAN
 
 func configure_confirmed_curve() -> void:
+	explosion_radius_squared = NAN
+	inverse_explosion_radius_squared = NAN
+	if is_finite(explosion_radius_m) and explosion_radius_m > 0:
+		explosion_radius_squared = explosion_radius_m*explosion_radius_m
+		inverse_explosion_radius_squared = 1.0/explosion_radius_squared
 	confirmed_decay_coefficient = NAN
 	if damage_type == "kinetic" and is_finite(penetration_upper) and is_finite(anchor_penetration) and is_finite(anchor_distance_m) and anchor_distance_m > 0 and penetration_upper >= anchor_penetration and anchor_penetration >= 5:
 		confirmed_decay_coefficient = (penetration_upper-anchor_penetration)/log(1.0+anchor_distance_m/100.0)

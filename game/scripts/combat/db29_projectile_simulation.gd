@@ -8,6 +8,7 @@ var collision := ProjectileCollisionWorld.new()
 var time_seconds := 0.0
 var failure_reason := ""
 var halted := false
+var overpenetration_enabled := false # Active ordered consumer; raw legacy batch remains isolated.
 var slots: Array[Dictionary] = []
 var free_slots: Array[int] = []
 var active_slots: Array[int] = []
@@ -16,6 +17,7 @@ var active_ids: Dictionary = {}
 var last_order := 0
 var battlefield := Rect2()
 var bounded := false
+var _settlement_inputs: Array[Dictionary] = []
 var profile := {"spawned":0,"impacts":0,"exits":0,"updates":0,"reuses":0,"failures":0}
 
 # Runtime map geometry, not a unit parameter or a projectile lifetime.
@@ -78,6 +80,8 @@ func step(events: Array[Dictionary] = [],units: ProjectileUnitMotion = null) -> 
 		# Only value source metadata and cached ammo reference survive firing.
 		var source := {"event_id":event.event_id,"emission_order":event.emission_order,"unit_id":event.unit_id,"owner_player_id":event.owner_player_id,"weapon_instance_id":event.weapon_instance_id}
 		var state := {"id":"projectile:"+str(event.event_id),"source":source,"ammo":event.ammo,"position":event.position,"velocity":event.velocity,"time_seconds":float(event.time_seconds),"distance_m":0.0,"ignore_house_id":int(event.get("ignore_house_id",0)),"ignore_target_house_id":int(event.get("ignore_target_house_id",0)),"generation":generations[index]}
+		state.ammo_values = ProjectileSettlementInput.ammunition(event.ammo)
+		state.weapon_values = event.get("weapon_values",{}).duplicate(true)
 		slots[index] = state
 		active_slots.append(index)
 		active_ids[event.event_id] = index
@@ -123,6 +127,7 @@ func step(events: Array[Dictionary] = [],units: ProjectileUnitMotion = null) -> 
 			continue
 		var terminal := _event(state,"battlefield_exit" if exited else "impact")
 		if not exited: terminal.merge({"point":hit.point,"normal":hit.normal,"object_id":hit.object_id,"object_category":hit.get("object_category",""),"hit_unit_id":hit.get("unit_id",0),"hit_unit_type":hit.get("unit_type",-1)},true)
+		_settlement_inputs.append(ProjectileSettlementInput.terminal(terminal,state.ammo_values,state.weapon_values))
 		output.append(terminal)
 		active_ids.erase(state.source.event_id)
 		slots[index] = {} # Clear cached ammo, source and ignore state on reuse.
@@ -139,6 +144,16 @@ func step(events: Array[Dictionary] = [],units: ProjectileUnitMotion = null) -> 
 		if a.projectile_id != b.projectile_id: return a.projectile_id < b.projectile_id
 		return a.reason == "spawn" and b.reason != "spawn")
 	return output
+
+# Explicit server-only handoff; no settlement fields are added to events used by
+# realtime presentation or frozen Replay v1. Taking the batch releases its ammo
+# values from the flight subsystem even though the pooled slots are already free.
+func take_settlement_inputs() -> Array[Dictionary]:
+	var result: Array[Dictionary] = _settlement_inputs.duplicate(true)
+	_settlement_inputs.clear()
+	result.sort_custom(func(a: Dictionary,b: Dictionary):
+		return a.projectile_id < b.projectile_id if a.time_seconds == b.time_seconds else a.time_seconds < b.time_seconds)
+	return result
 
 func _valid(event: Dictionary,step_end: float) -> bool:
 	for key: String in ["event_id","emission_order","unit_id","owner_player_id","weapon_instance_id","position","velocity","time_seconds","ammo"]:

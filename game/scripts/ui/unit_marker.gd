@@ -9,11 +9,14 @@ var unit_kind := UnitDefinition.UnitType.INFANTRY
 var armed := true
 var player_id := 0
 var viewer_player_id := -1 # -1 retains frozen historical presentation.
+var team_id := 1
 var is_order := false
 var selected := false
 var member_count := -1
 var personnel_state := "normal"
 var invalid_destination := false
+var temporary_role := ""
+var module_levels: Array = []
 
 func _ready() -> void:
 	focus_mode = Control.FOCUS_NONE
@@ -59,15 +62,25 @@ func _draw() -> void:
 	# This consumes an eventual synchronized state; no new panic simulation.
 	if not is_order and personnel_state in ["panic","disabled"]:
 		var tint := Color.YELLOW if personnel_state == "panic" else Color.RED
-		for strip: int in int(style.body_size.x):
-			draw_rect(Rect2(strip,0,1,style.body_size.y),tint.lerp(style.gray_fill,strip/style.body_size.x))
-	draw_rect(body,style.color_for(player_id,viewer_player_id),false,style.border_width)
+		for strip: int in int(style.body_size.y):
+			draw_rect(Rect2(0,strip,style.body_size.x,1),tint.lerp(style.gray_fill,strip/maxf(1,style.body_size.y-1)))
+	draw_rect(body,Color(1.0,0.25,0.15) if team_id == 2 and viewer_player_id >= 0 else style.color_for(player_id,viewer_player_id),false,style.border_width)
 	if selected: draw_rect(body.grow(style.selection_margin),Color.WHITE,false,style.selection_width)
+	if not is_order and module_levels.size() == 4:
+		for slot: int in 3:
+			var grade: int = module_levels[[0,2,3][slot]]
+			if grade > 0: draw_rect(Rect2(style.body_size.x+4,slot*13,8,8),Color.YELLOW if grade == 1 else Color.RED)
 	var font := ThemeDB.fallback_font
 	var symbol := "⊘" if is_order and invalid_destination else style.symbol_for(unit_kind,armed)
 	var width := font.get_string_size(symbol,HORIZONTAL_ALIGNMENT_LEFT,-1,style.font_size).x
 	var texture := style.texture_for(unit_kind,armed)
-	if texture != null and not invalid_destination:
+	if viewer_player_id >= 0 and not invalid_destination:
+		TemporaryUnitBadge.draw_badge(self,style.body_size/2-Vector2(0,4),unit_kind == UnitDefinition.UnitType.ARMORED_VEHICLE)
+		var caption := TemporaryUnitBadge.caption(temporary_role)
+		if not caption.is_empty():
+			var caption_width := font.get_string_size(caption,HORIZONTAL_ALIGNMENT_LEFT,-1,10).x
+			draw_string(font,Vector2((style.body_size.x-caption_width)/2,style.body_size.y-3),caption,HORIZONTAL_ALIGNMENT_LEFT,-1,10,Color.WHITE)
+	elif texture != null and not invalid_destination:
 		draw_texture_rect(texture,Rect2((style.body_size-style.identification_size)/2,style.identification_size),false)
 	else:
 		draw_string(font,Vector2((style.body_size.x-width)/2,style.body_size.y/2+style.font_size/3.0),symbol,HORIZONTAL_ALIGNMENT_LEFT,-1,style.font_size,Color.WHITE)

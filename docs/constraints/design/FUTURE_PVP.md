@@ -1,6 +1,6 @@
 # 长期愿景：PVP
 
-所属基线：[DESIGN_BASELINE.md](../DESIGN_BASELINE.md)，标识DB-2026-10-06-40。本文是该入口列明的规范正文，不是独立基线。
+所属基线：[DESIGN_BASELINE.md](../DESIGN_BASELINE.md)，标识DB-2026-10-07-41。本文是该入口列明的规范正文，不是独立基线。
 
 适用范围：仅供未来阶段讨论，不影响当前PVE开发与验收。
 

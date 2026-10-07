@@ -1,0 +1,70 @@
+extends SceneTree
+
+var checks := 0
+var failures := 0
+func check(value: bool,label: String) -> void:
+	checks += 1
+	if not value:
+		failures += 1
+		push_error(label)
+
+func _initialize() -> void:
+	call_deferred("run")
+
+func run() -> void:
+	var state := InfantrySuppressionState.new()
+	check(not state.configure(0,40,10,0.05),"zero configuration rejected")
+	check(not state.configure(8,NAN,10,0.05),"nonfinite allowance rejected")
+	check(state.configure(8,40,10,0.05),"explicit confirmed standard configuration")
+	check(state.personnel_state() == state.PersonnelState.CALM,"initial calm")
+	check(state.effective_event(320) and state.personnel_state() == state.PersonnelState.PANIC,"exact panic boundary")
+	check(state.ratio() == 0.5,"ratio uses living threshold")
+	check(state.effective_event(1000) and state.q == 640,"hard cap and threshold crossing")
+	check(state.modifiers().movement == 0.2 and state.modifiers().aim_time_multiplier == 5,"disabled modifiers")
+	check(state.modifiers().mechanical_load_multiplier == 1,"mechanical loading exempt")
+	check(state.advance_to(10) and state.q == 640,"no recovery before or at waiting boundary")
+	check(state.advance_to(11) and state.q == 624,"confirmed full configured threshold rate")
+	check(state.personnel_state() == state.PersonnelState.PANIC,"recovery releases disabled")
+	check(state.effective_event(0) and state.last_effective_event == 11,"zero amount effective event refreshes wait")
+	check(state.advance_to(21) and state.q == 624,"refreshed wait inclusive boundary")
+	check(state.set_alive_count(4) and state.q == 320,"casualty clamp without extra Q")
+	check(state.last_effective_event == 11,"membership does not refresh timer")
+	check(state.advance_to(22) and state.q == 304,"decay remains based on configured full strength")
+	check(state.set_alive_count(8) and state.personnel_state() == state.PersonnelState.CALM,"reinforcement raises threshold without Q addition")
+	check(not state.advance_to(21) and state.time_seconds == 22,"backdated time rejected without mutation")
+	check(not state.effective_event(-1) and not state.effective_event(INF),"invalid amount rejected")
+	check(not state.set_alive_count(9),"population beyond configured count rejected")
+	check(state.advance_to(100) and state.q == 0,"recovery clamps at zero")
+	check(state.set_alive_count(0) and state.personnel_state() == state.PersonnelState.DEAD and state.ratio() == 0,"dead has no zero threshold division")
+	check(not state.effective_event(10),"dead cannot receive suppression")
+	var a := InfantrySuppressionState.new()
+	var b := InfantrySuppressionState.new()
+	a.configure(8,40,10,0.05)
+	b.configure(8,40,10,0.05)
+	a.effective_event(500)
+	b.effective_event(500)
+	a.advance_to(15)
+	for tick: int in 450: b.advance_to((tick+1)/30.0)
+	check(absf(a.q-b.q) < 0.000001,"analytic recovery independent of tick subdivision")
+	var settlement := InfantrySuppressionSettlement.new()
+	check(settlement.register_unit(1,8,40,10,0.05) and settlement.register_unit(2,8,40,10,0.05),"explicit registered squad configurations")
+	check(settlement.commit("first",0,[{"unit_id":1,"amount":600}],{1:8}).ok,"actual event amount once")
+	check(settlement.commit("casualty",1,[{"unit_id":1,"amount":20}],{1:4}).ok and settlement.states[1].q == 320,"casualties before amount with new cap")
+	check(not settlement.commit("casualty",1,[{"unit_id":1,"amount":20}],{1:4}).ok and settlement.states[1].q == 320,"deduplicated event cannot reapply")
+	check(settlement.commit("boundary",12,[{"unit_id":1,"amount":0}],{1:4}).ok and settlement.states[1].q == 304,"recovery before same-time effective event")
+	check(settlement.states[1].last_effective_event == 12,"same-time event refreshes waiting boundary")
+	var old: float = settlement.states[1].q
+	check(not settlement.commit("invalid",13,[{"unit_id":1,"amount":10},{"unit_id":2,"amount":-1}],{1:4,2:8}).ok and settlement.states[1].q == old,"invalid later row cannot partially mutate earlier squad")
+	check(not settlement.commit("duplicate-squad",13,[{"unit_id":1,"amount":10},{"unit_id":1,"amount":10}],{1:4}).ok,"one explosion cannot duplicate squad rows")
+	check(settlement.commit("membership-only",13,[],{1:3}).ok and settlement.states[1].last_effective_event == 12,"casualty alone never refreshes timer")
+	check(settlement.commit("dead",14,[{"unit_id":1,"amount":1000}],{1:0}).ok and settlement.states[1].q == 0,"dead after damage receives no new Q")
+	a.configure(3,40,10,0.05)
+	a.effective_event(240)
+	a.advance_to(10)
+	check(a.personnel_state() == InfantrySuppressionState.PersonnelState.DISABLED and a.modifiers().movement == 0.2 and a.modifiers(true).movement == 0.5,"inclusive exact state and open-interval recovery rate are distinct")
+	a.advance_to(30)
+	check(a.q == 120 and a.personnel_state() == InfantrySuppressionState.PersonnelState.PANIC and a.modifiers(true).movement == 1.0,"exact lower threshold retains panic at instant, calm for following interval")
+	a.effective_event(0)
+	check(a.modifiers(true).movement == 0.5 and a.last_effective_event == 30,"same-time zero amount refresh suspends recovery immediately")
+	print("06D SUPPRESSION: %d checks, %d failures" % [checks,failures])
+	quit(0 if failures == 0 else 1)
