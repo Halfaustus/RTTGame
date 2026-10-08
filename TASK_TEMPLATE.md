@@ -1,6 +1,6 @@
 # TASK-YYYY-NNN — 任务名称
 
-模板版本：TW-2026-10-06-01。复制到docs/tasks/任务ID.md后填写；删除提示，不适用项说明理由。
+模板版本：TW-2026-10-08-02。复制到docs/tasks/任务ID.md后填写；删除提示，不适用项说明理由。
 
 ## 元信息
 
@@ -15,7 +15,7 @@
 | Baseline Revision | 标识＋相关章节/内容快照 |
 | DATA Reference | 文件、工作表、对象/行ID、版本或摘要 |
 | Source Revision | commit或明确未核验 |
-| Authorization | 用户指令/既有授权、允许范围、核验时间 |
+| Authorization | 用户目标＋AGENTS默认授权/既有专项授权、范围、核验时间（代理核验，不逐步索批） |
 | Pause State | 相关暂停及解除依据；未知时写未核验 |
 
 ## Goal
@@ -103,7 +103,7 @@ Blocks只由索引反向汇总，不作为第二套依赖源。
 参照TASK_WORKFLOW §5逐项记录Pass/Fail/N/A及依据。
 
 DoR结论：未评审。
-执行授权结论：未核验。
+执行授权结论：代理按用户目标、AGENTS默认授权及明确暂停核验；仅缺失产品决策或高风险专项授权时提问。
 
 ## Blockers / Discovered Issues
 

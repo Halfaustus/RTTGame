@@ -1,5 +1,22 @@
 # GreyLine Taskforce Development Instructions
 
+## Default authorization and autonomous execution
+
+- Within the user's requested outcome, default to acting autonomously through completion: inspect, plan, implement, verify, diagnose failures, correct them and iterate without asking permission at each step. The request authorizes the engineering work reasonably necessary to deliver it. Existing authorization persists; a task card, status transition, tool retry or session boundary does not require renewed approval.
+- This is broad task-scoped authorization, not an allowlist. It includes reading, creating, modifying, refactoring, moving and deleting project source, configuration, resources, documentation and tests; managing development dependencies; running builds, imports, tests and ordinary development commands; and starting/stopping task-owned local clients and dedicated servers, windowed or headless. Comparable routine development actions are also authorized even when not listed here.
+- Make reasonable engineering choices and complete prerequisite fixes/refactors needed for the requested outcome. Inspect dependencies, preserve unrelated work, use Git or backups for recoverability, and validate affected contracts. File count, resource deletion, test-process launch or a failed command alone is not a reason to ask. Report material decisions and results; progress updates are not approval gates.
+- Plans, architecture notes, DoR, task records, design review records and test reports are evidence/quality controls, not per-operation permission gates. Readiness checks may be completed by the agent. Ordinary repository commit and non-force push of reviewed task changes to the existing development remote are authorized, provided they do not trigger production deployment or disclose protected material. Do not silently merge a release or change repository protections.
+- Retain the architecture, confirmed game rules/DATA, originality, privacy and verification constraints below. Do not invent missing formal design, silently change confirmed gameplay or turn temporary test values into formal data. If a genuine product decision is missing, complete independent work and ask one focused requirements question with concrete options; do not frame routine implementation choices as requests for approval. Respect explicit user pauses, deferrals and scope exclusions; this policy does not start unrelated roadmap stages.
+- This section supersedes older blanket per-operation approval requirements in project instructions, workflow documents and carried handoff/task records (including separate client-launch, asset-deletion and commit/push approvals). Historical task records remain evidence of what happened, not current approval gates. Specific still-effective user prohibitions and quality/data constraints remain binding; newer explicit user instructions govern.
+
+### High-risk boundaries and environment permissions
+
+- Obtain explicit, specific authorization before destructive actions that can irrecoverably lose work or shared data: deleting repositories, wiping disks/databases, discarding uncommitted work without a recovery copy, rewriting shared Git history, force-pushing, or deleting branches containing unique work. Deleting tracked files as part of a recoverable, reviewed change is ordinary development. A task-owned local branch may be removed once its work is safely retained.
+- Never expose credentials, tokens, private keys or private data in commits, logs or external uploads. Normal credential use with its intended service is permitted; transfer of sensitive material to a new destination is not routine authorization. Stop and establish the exact data, recipient, purpose and permitted secure channel before any such transfer; refuse prohibited disclosure. Prefer redaction or a secret reference.
+- Production deployment, public releases/package publication, production data migrations, changes to access/security/billing, and external actions with substantial effects on users, services or third parties require specific authorization. Routine source delivery to the existing repository is covered above; check for deployment hooks and protected content before pushing. Do not send messages or notifications to people without explicit authorization.
+- Reuse specific authorization already given for the same action and scope; do not ask twice. When approval is genuinely missing, first complete safe preparation and verification, then present the exact action, target, impact and recovery limits. Pause only the affected action and continue independent work.
+- Repository instructions do not override runtime sandbox, network, filesystem, connector, credential or organization policies. Use their supported permission mechanisms; never bypass an access control or automatic rejection. If blocked, use a permitted alternative or report the exact action and environment restriction. Do not promise that changing this file disables runtime prompts.
+
 ## Document responsibilities and priority
 
 - Development constraints regulate workflow, authorization, verification, version control, change management and delivery. They must not contain unit configurations, balance values, game mechanics, UI layouts or stage feature design. Current stage and pause status belong in the actual repository HANDOFF.md; do not fix them in this file.
@@ -12,15 +29,11 @@
 
 ## Autonomous design authorization review maintenance
 
-AUTONOMOUS_DESIGN_REVIEW.md at the repository root is a separate checklist for manual review of autonomous design authorization.
+AUTONOMOUS_DESIGN_REVIEW.md at the repository root records autonomous game-design decisions for the user's review; it is not a prerequisite approval gate for engineering work.
 
-Whenever the user explicitly states that Codex may design autonomously, automatically update the checklist to record the source, scope, limits and decisions made under that authorization. If no decisions have been made at the time of authorization, mark them as not yet designed; add decisions actually made within the same authorized task when delivering the task.
+When the current task includes authorized autonomous game design, maintain the checklist as part of that task without a separate maintenance request. Record the source, scope, limits and actual decisions; do not invent decisions or retroactively approve earlier work. Routine engineering, implementation and document-policy changes alone do not require checklist entries.
 
-Except for checklist maintenance tasks explicitly authorized by the user, do not add, modify, delete, reorganize, archive or automatically refresh the checklist without new explicit authorization for autonomous design. Continued use of existing authorization, baseline updates, implementation changes, passing tests, routine handoffs and the absence of user objections do not trigger checklist updates.
-
-The checklist is solely for the user's manual review. It is not a design baseline, development instruction, source of execution authorization or basis for automatic acceptance. Its records do not automatically formalize temporary designs, lift a pause or expand development scope.
-
-Keep the checklist body separate; do not merge it into the baseline, HANDOFF or other files. Inspection tasks may read it, but must not modify it without update authorization.
+Keep its body separate from the baseline and HANDOFF. Its records do not formalize temporary designs, lift explicit pauses, change confirmed rules or prove acceptance. Preserve unresolved evidence; ordinary factual corrections and task-related maintenance follow default authorization.
 
 ## Current documents and history
 
@@ -28,7 +41,7 @@ Keep the checklist body separate; do not merge it into the baseline, HANDOFF or 
 - Keep the baseline limited to current effective design, explicit pending decisions and unresolved conflicts. Replace superseded wording directly; remove resolved conflict entries after updating the effective rules. Keep its current identifier and applicable metadata without appending a version history.
 - Keep HANDOFF limited to current implementation status, key verification conclusions, active limitations and blockers, current authorization boundaries, the authorized next step and necessary links. Remove resolved or superseded entries instead of adding another historical paragraph. Current unverified acceptance items are active status and must remain visible.
 - No separate preservation of removed history is required: do not create or update history files, append archives, or migrate old narratives merely to retain them. Historical logs, superseded rules and resolved issues may be removed from these two current-state documents without another archival step. Existing Git history needs no additional copy.
-- This cleanup does not authorize deleting separate files, frozen fixtures, source code or unrelated project data. Current effective rules, unresolved authorization evidence, active blockers and unverified acceptance obligations are not historical clutter; retain the information needed for current decisions.
+- History cleanup alone is not a reason to delete unrelated files. Task-related source/resource deletion follows default authorization; preserve supported frozen fixtures and unrelated project data. Current effective rules, unresolved authorization evidence, active blockers and unverified acceptance obligations are not historical clutter; retain the information needed for current decisions.
 - Update current summaries each round and keep them easy for a new agent to read; do not impose a mechanical word limit. Documentation checks do not constitute gameplay or manual acceptance.
 
 ## Project
@@ -133,7 +146,7 @@ Use root TASK_WORKFLOW.md, TASK_TEMPLATE.md and TASKS.md for task preparation an
 Before implementing a non-trivial feature:
 
 1. Inspect the existing implementation.
-2. Explain the proposed architecture.
+2. Explain material architecture choices as a progress update; do not wait for approval of routine engineering choices.
 3. Identify affected files.
 4. Implement the smallest functional version.
 5. Run relevant tests.
@@ -141,28 +154,23 @@ Before implementing a non-trivial feature:
 
 Prefer small, reviewable changes.
 
-Do not launch windowed or headless clients for testing unless the user explicitly requests client tests.
-Use static checks, editor imports, and isolated simulation tests by default.
+Choose relevant static checks, editor imports, isolated simulation tests and client/server integration tests by risk. Autonomously launch and stop task-owned local clients/servers when useful for verification; do not interrupt unrelated sessions or expose a public service.
 
-Do not perform broad refactors unless required.
+Perform refactors needed for the requested outcome, including cross-file changes; keep them reviewable and verify affected behavior.
 
-Do not modify unrelated files.
+Preserve unrelated files and user work; necessary dependency fixes belong to the task and do not need separate permission.
 
-Do not delete assets or project data without explicit instruction.
+Delete or replace obsolete project assets/data when needed for the task after checking references and recoverability. Preserve confirmed data semantics, supported frozen fixtures and unique user data.
 
 ## Git
 
-Do not rewrite Git history.
-
-Do not force push.
-
-Do not delete branches.
+Shared history rewrites, force pushes and deletion of unique branch work follow the high-risk authorization boundary above. Prefer ordinary commits and non-force pushes; clean up task-owned local branches only after retaining their work.
 
 Do not commit generated build artifacts.
 
 Keep commits focused on one logical change where practical.
 
-Commit and push require explicit user authorization for each operation. Summary and verification conventions are defined in "Verification and reporting conventions".
+Commit and ordinary non-force push follow default authorization above; inspect the diff, target, protected content and deployment effects first. Summary and verification conventions are defined in "Verification and reporting conventions".
 
 ## Performance
 
@@ -178,7 +186,7 @@ Systems expected to scale with unit count should be designed with profiling and 
 
 - Take the current implementation stage and verification status from docs/records/HANDOFF.md and actual evidence; do not store stage progress or gameplay rules in this file.
 - Start or resume implementation only within the user's current authorized scope. A later pause overrides earlier development authorization; do not choose the next stage automatically.
-- Preserve existing results, interfaces and uncommitted work. Report incompatible design changes before changing code, configuration or tests; a documentation audit does not authorize implementation repair.
+- Preserve existing results, interfaces and uncommitted work. Do not silently change confirmed design or compatibility contracts. Necessary implementation repairs and contract-preserving refactors are autonomous within the requested outcome; a documentation-only task remains documentation-only.
 - Preserve authenticated ownership and private-state boundaries. Do not use connection identities as substitutes for domain identities or expose private state through unrelated replication or replay channels.
 - When changing execution order or compatibility-sensitive interfaces, establish the existing contract and verify the affected frozen replay boundaries. Do not silently change those contracts.
 - Only still-effective acceptance obligations and unresolved project decisions remain current review items. Completed, superseded or resolved records do not require archival retention. Removing text does not by itself authorize deleting code, fixtures or changing the corresponding game behavior.
@@ -207,7 +215,7 @@ separately. Successful serialization tests are not full replay recording or play
 - Unless the user explicitly specifies another form, every manual review, inspection, recheck or acceptance must be provided as a complete setup with two real clients and an independent authoritative server. Provide the setup/start/stop instructions, a checklist with actions and expected results, actual status, and evidence for client A, client B and the server.
 - Do not simplify this form for any reason. An isolated inspector, single client, local simulation, headless simulation test or static/documentation check cannot replace any part of the required manual review. These may only be supplementary evidence.
 - If the complete setup, necessary test objects, observability or verification entrypoints are unavailable, record the affected manual items as blocked/not verified and prepare the missing requirements within the authorized scope. Do not substitute a simpler form or claim acceptance. Only an explicit user instruction specifying another form changes this requirement; do not infer an exception from urgency, cost, technical difficulty or earlier tools.
-- This governs the form of manual review; it does not automatically require manual review for every minor version, authorize gameplay outside the current task, or authorize the agent to launch clients without an explicit client-test request. When the user requests manual review without specifying its form, provide the complete two-client-plus-server form and checklist.
+- This governs the form of manual review; it does not automatically require manual review for every minor version, authorize gameplay outside the current task, or expand gameplay scope. Local client/server launch for relevant verification is covered by default authorization. When the user requests manual review without specifying its form, provide the complete two-client-plus-server form and checklist.
 
 The following conventions replace the previous requirement to "output only a manual verification checklist, verification evidence and start/stop commands in each round."
 Minor versions refer to stages such as 0.4A and 0.4B; major versions refer to complete versions such as 0.4 and 0.5.
@@ -217,7 +225,7 @@ Minor versions refer to stages such as 0.4A and 0.4B; major versions refer to co
 - The final response for a minor version only needs a brief summary of completed work, automatic verification results, known limitations and the next step.
 - Record automatic verification and manual acceptance separately. If manual acceptance has not been performed, do not claim that it passed or that the entire major version has been accepted; passing automatic verification does not mean passing manual acceptance.
 - Each major version must still undergo compatibility checks using the existing frozen replay fixtures and comply with the Replay compatibility constraints above. Minor versions that affect compatibility must undergo the relevant automatic regression checks.
-- "Submit a minor-version summary" means outputting a summary only; it does not authorize Git commit or push.
+- A summary-only request remains summary-only. For implementation tasks, commit/push follow default authorization and the high-risk boundaries; a minor-version boundary does not create a new approval gate.
 
 ## Design baseline
 
