@@ -340,7 +340,8 @@ func _advance(delta: float,only_id: int = 0,follow_members: bool = true) -> Dict
 	var changed: Dictionary[int, Vector3] = {}
 	for id: int in attack_facing_requests:
 		if only_id > 0 and id != only_id: continue
-		if _units.has(id) and not _targets.has(id):
+		# A parked attack route permits Hull rotation while retaining its path.
+		if _units.has(id) and (not _targets.has(id) or _engaging.has(id)):
 			var previous := _units[id].yaw
 			_turn(_units[id],attack_facing_requests[id],delta)
 			if previous != _units[id].yaw: changed[id] = _units[id].position

@@ -118,6 +118,8 @@ func _initialize_weapons() -> void:
 		slot_definition.slot_id = allocation.slot_id
 		slot_definition.weapon = allocation.definition
 		slot_definition.direction_primary = allocation.direction_primary
+		slot_definition.primary_weapon = allocation.primary_weapon
+		slot_definition.armored_primary_weapon = allocation.armored_primary_weapon
 		slot_definition.orientation_priority = allocation.orientation_priority
 		var instance := _attach_weapon(slot_definition,allocation.node_kind,identifier,spatial)
 		instance.inventory = allocation.initial_inventory.duplicate(true)

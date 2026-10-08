@@ -4,6 +4,7 @@ extends Control
 signal command_requested(command: String)
 signal unit_requested(unit_id: int)
 signal locate_requested(unit_id: int)
+signal group_requested(group: int, additive: bool)
 const BOTTOM_HEIGHT := 190.0
 const MAP_WIDTH := 200.0
 const SUMMARY_WIDTH := 220.0
@@ -23,6 +24,7 @@ var _message_rows: Array[Dictionary] = []
 var _history_open := false
 var _minimap: BattleMinimap
 var _weapon_panels := {}
+var _group_buttons: Array[Button] = []
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -38,6 +40,27 @@ func _ready() -> void:
 	_minimap.custom_minimum_size = Vector2(MAP_WIDTH, BOTTOM_HEIGHT)
 	_minimap.mouse_filter = Control.MOUSE_FILTER_STOP
 	row.add_child(_minimap)
+	var groups := GridContainer.new()
+	groups.name = "ControlGroups"
+	groups.columns = 2
+	groups.custom_minimum_size = Vector2(76, BOTTOM_HEIGHT)
+	groups.add_theme_constant_override("h_separation", 4)
+	groups.add_theme_constant_override("v_separation", 4)
+	row.add_child(groups)
+	for index: int in 10:
+		var group := (index + 1) % 10
+		var button := Button.new()
+		button.text = str(group)
+		button.custom_minimum_size = Vector2(32, 32)
+		button.focus_mode = Control.FOCUS_NONE
+		button.add_theme_font_size_override("font_size", 16)
+		button.add_theme_stylebox_override("normal", _group_style(Color.WHITE))
+		button.add_theme_stylebox_override("hover", _group_style(Color.WHITE))
+		button.add_theme_stylebox_override("pressed", _group_style(Color.WHITE))
+		button.add_theme_stylebox_override("disabled", _group_style(Color(0.45, 0.45, 0.45)))
+		button.pressed.connect(func(): group_requested.emit(group, Input.is_key_pressed(KEY_SHIFT)))
+		groups.add_child(button)
+		_group_buttons.append(button)
 	var scroll := ScrollContainer.new()
 	scroll.name = "Weapons"
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -106,6 +129,29 @@ func _ready() -> void:
 
 func configure_map(bounds: Rect2) -> void:
 	_minimap.bounds = bounds
+
+func _group_style(color: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.04, 0.04, 0.04, 0.75)
+	style.border_color = color
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(0)
+	return style
+
+func show_control_groups(groups: Dictionary, selection: Array[int], available: Array[int]) -> void:
+	for index: int in _group_buttons.size():
+		var group := (index + 1) % 10
+		var members: Array[int] = []
+		for id: int in groups.get(group, []):
+			if available.has(id) and not members.has(id): members.append(id)
+		var enabled := not members.is_empty()
+		_group_buttons[index].disabled = not enabled
+		_group_buttons[index].modulate = Color.WHITE if enabled else Color(0.55, 0.55, 0.55)
+		var selected := enabled and members.size() == selection.size()
+		if selected:
+			for id: int in members:
+				if not selection.has(id): selected = false; break
+		_group_buttons[index].add_theme_stylebox_override("normal", _group_style(Color(1.0, 0.78, 0.2) if selected else Color.WHITE))
 
 func update_map(units: Array[Dictionary], viewer: int) -> void:
 	_minimap.update_units(units, viewer)
@@ -176,7 +222,7 @@ func show_selection(units: Array[Dictionary], structures: Dictionary, viewer: in
 					panel.ammo_row.add_child(label)
 					panel.ammo_labels[ammo] = label
 				var stock: Label = panel.ammo_labels[ammo]
-				stock.text = "%s\n%d" % [_name_for("Ammo", ammo), weapon.inventory[ammo]]
+				stock.text = "%s\n剩余 %d" % [_name_for("Ammo", ammo), weapon.inventory[ammo]]
 				stock.modulate = Color(0.5, 0.5, 0.5) if int(weapon.inventory[ammo]) == 0 else Color.WHITE
 			for ammo: String in panel.ammo_labels.keys():
 				if not weapon.inventory.has(ammo):
@@ -252,4 +298,5 @@ func clear_session() -> void:
 	_history.text = "战场信息 · 展开历史"
 	_refresh_messages()
 	show_selection([], {}, 0)
+	show_control_groups({}, [], [])
 	update_map([], 0)

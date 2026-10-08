@@ -20,20 +20,24 @@ func aim_point(weapon: RuntimeWeaponInstance) -> Vector3:
 func _init() -> void: random.seed = Prototype05DCatalog.RANDOM_SEED
 
 func eligibility(weapon: RuntimeWeaponInstance,sample: Dictionary = {}) -> String:
+	return candidate_eligibility(weapon,weapon.target,sample)
+
+# Query a candidate without rebinding the live weapon or resetting any timers.
+func candidate_eligibility(weapon: RuntimeWeaponInstance,target: AttackTarget,sample: Dictionary = {}) -> String:
 	if not weapon.owning_node_valid(): return "owner_invalid"
 	if units.get(weapon.owner_state().unit_id) != weapon.owner_state(): return "owner_invalid"
 	if weapon.squad_channel != null and weapon.operator_reason != "eligible": return weapon.operator_reason
 	if not weapon.enabled: return "disabled"
-	if weapon.target == null: return "no_target"
-	if not weapon.target.valid(units): return "target_invalid"
+	if target == null: return "no_target"
+	if not target.valid(units): return "target_invalid"
 	var definition := weapon.definition
 	if not is_finite(definition.range_m) or not is_finite(definition.aim_min_seconds) or not is_finite(definition.aim_max_seconds) or definition.range_m < 0 or definition.allowed_target_types.is_empty() or definition.ammo_definitions.is_empty() or definition.consumption_per_projectile <= 0 or definition.aim_min_seconds < 0 or definition.aim_max_seconds < definition.aim_min_seconds or definition.moving_aim_qualification < 0: return "configuration_missing"
 	if not visibility.is_valid() or not clear_path.is_valid() or not moving.is_valid(): return "configuration_missing"
-	if not visibility.call(weapon.owner_state(),weapon.target): return "not_visible"
-	if weapon.target.kind == AttackTarget.Kind.UNIT and weapon.target.state().team_id == weapon.owner_state().team_id: return "friendly_target"
-	if weapon.target.kind == AttackTarget.Kind.UNIT and not definition.allowed_target_types.has(weapon.target.target_type()): return "type_not_allowed"
+	if not visibility.call(weapon.owner_state(),target): return "not_visible"
+	if target.kind == AttackTarget.Kind.UNIT and target.state().team_id == weapon.owner_state().team_id: return "friendly_target"
+	if target.kind == AttackTarget.Kind.UNIT and not definition.allowed_target_types.has(target.target_type()): return "type_not_allowed"
 	var origin: Vector3 = sample.get("position",weapon.world_position())
-	var target_position: Vector3 = sample.get("target",weapon.target.position())
+	var target_position: Vector3 = sample.get("target",target.position())
 	if origin.distance_to(target_position) > definition.range_m + Prototype05DCatalog.RANGE_EPSILON_M: return "out_of_range"
 	var artillery := artillery_tasks.has(weapon.instance_id)
 	if not artillery and not clear_path.call(origin,target_position): return "path_blocked"
@@ -51,6 +55,10 @@ func _prepare() -> Dictionary:
 	var drivers := {}
 	for state: UnitState in units.values():
 		for weapon: RuntimeWeaponInstance in state.runtime_weapons:
+			# Retain legal automatic targets even if a nearer enemy arrives. Only
+			# target invalidation causes replacement; transient readiness pauses aim.
+			if weapon.target != null and not weapon.manual_target and eligibility(weapon) in ["target_invalid","not_visible","out_of_range","path_blocked","type_not_allowed","friendly_target"]:
+				weapon.clear_target()
 			if weapon.target == null and automatic_target_provider.is_valid():
 				var candidate: AttackTarget = automatic_target_provider.call(weapon)
 				if candidate != null: weapon.bind_target(candidate,false)
@@ -64,7 +72,7 @@ func _prepare() -> Dictionary:
 					var reason := weapon.eligibility_reason
 					weapon.clear_target()
 					weapon.eligibility_reason = reason
-				elif weapon.eligibility_reason in ["disabled","sprinting","owner_invalid"]: weapon.reset_aim()
+				elif weapon.eligibility_reason == "owner_invalid" or (weapon.manual_target and weapon.eligibility_reason in ["disabled","sprinting"]): weapon.reset_aim()
 				continue
 			var point := aim_point(weapon)
 			if not point.is_finite():

@@ -17,6 +17,33 @@ var personnel_state := "normal"
 var invalid_destination := false
 var temporary_role := ""
 var module_levels: Array = []
+var laser_state := "inactive"
+var hold_fire := false
+var engaged := false
+var return_fire_only := false
+var carried_personnel := 0
+var mixed_cargo := false
+var fire_progress: Dictionary = {}
+var health_known := false
+var health_ratio := 0.0
+
+func apply_health(health: float, maximum_health: float) -> void:
+	health_known = is_finite(health) and is_finite(maximum_health) and maximum_health > 0.0 and health >= 0.0
+	if health_known:
+		health_ratio = clampf(health / maximum_health,0.0,1.0)
+	refresh()
+
+func apply_status(status: Dictionary) -> void:
+	personnel_state = status.get("personnel_state","normal")
+	module_levels = status.get("modules",[]).duplicate()
+	laser_state = status.get("laser","inactive")
+	hold_fire = status.get("hold_fire",false)
+	engaged = status.get("engaged",false)
+	return_fire_only = status.get("return_fire_only",false)
+	carried_personnel = status.get("carried_personnel",0)
+	mixed_cargo = status.get("mixed_cargo",false)
+	fire_progress = status.get("fire_progress",{}).duplicate()
+	refresh()
 
 func _ready() -> void:
 	focus_mode = Control.FOCUS_NONE
@@ -25,7 +52,7 @@ func _ready() -> void:
 	size = style.body_size
 	for state: String in ["normal","hover","pressed","disabled","focus"]:
 		add_theme_stylebox_override(state,StyleBoxEmpty.new())
-	# Reserved layout hooks only; status indicators are deferred in 0.5C.
+	# Fixed anchors remain compatible with the frozen historical presentation.
 	for location: String in ["LeftStatusSlots","RightStatusSlots","TopStatusSlots","BottomStatusSlots"]:
 		var hook := Control.new()
 		hook.name = location
@@ -58,19 +85,43 @@ func _gui_input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var body := Rect2(Vector2.ZERO,style.body_size)
+	var is_enemy := team_id == 2 and viewer_player_id >= 0
 	draw_rect(body,style.gray_fill)
 	# This consumes an eventual synchronized state; no new panic simulation.
 	if not is_order and personnel_state in ["panic","disabled"]:
 		var tint := Color.YELLOW if personnel_state == "panic" else Color.RED
 		for strip: int in int(style.body_size.y):
 			draw_rect(Rect2(0,strip,style.body_size.x,1),tint.lerp(style.gray_fill,strip/maxf(1,style.body_size.y-1)))
-	draw_rect(body,Color(1.0,0.25,0.15) if team_id == 2 and viewer_player_id >= 0 else style.color_for(player_id,viewer_player_id),false,style.border_width)
+	draw_rect(body,Color(1.0,0.25,0.15) if is_enemy else style.color_for(player_id,viewer_player_id),false,style.border_width)
 	if selected: draw_rect(body.grow(style.selection_margin),Color.WHITE,false,style.selection_width)
 	if not is_order and module_levels.size() == 4:
 		for slot: int in 3:
 			var grade: int = module_levels[[0,2,3][slot]]
 			if grade > 0: draw_rect(Rect2(style.body_size.x+4,slot*13,8,8),Color.YELLOW if grade == 1 else Color.RED)
 	var font := ThemeDB.fallback_font
+	var has_fire_progress := not fire_progress.is_empty() and float(fire_progress.get("remaining_seconds",0.0)) > 0
+	if not is_order:
+		var work := ["L" if laser_state != "inactive" else "", "×" if hold_fire else "", "!" if engaged else ""]
+		for slot: int in work.size():
+			if not work[slot].is_empty(): draw_string(font,Vector2(-13,11+slot*13),work[slot],HORIZONTAL_ALIGNMENT_LEFT,-1,11,Color.YELLOW if slot == 0 and laser_state == "paused" else Color.WHITE)
+		if return_fire_only: draw_string(font,Vector2(-27,11),"H",HORIZONTAL_ALIGNMENT_LEFT,-1,11,Color.WHITE)
+		if mixed_cargo or carried_personnel > 0:
+			var load_text := "▣" if mixed_cargo else str(carried_personnel)
+			var load_width := font.get_string_size(load_text,HORIZONTAL_ALIGNMENT_LEFT,-1,11).x
+			draw_string(font,Vector2((style.body_size.x-load_width)/2,-4),load_text,HORIZONTAL_ALIGNMENT_LEFT,-1,11,Color.WHITE)
+		var fire_bar_y := style.body_size.y+style.count_gap
+		if has_fire_progress and unit_kind in [UnitDefinition.UnitType.ARMORED_VEHICLE,UnitDefinition.UnitType.INFANTRY]:
+			var fire_bar := Rect2(0,fire_bar_y,style.body_size.x,3.0)
+			draw_rect(fire_bar,Color(0.15,0.15,0.15))
+			fire_bar.size.x *= clampf(float(fire_progress.get("progress",0.0)),0.0,1.0)
+			draw_rect(fire_bar,Color.WHITE)
+		if unit_kind == UnitDefinition.UnitType.ARMORED_VEHICLE:
+			var health_bar_y := fire_bar_y+3.0+style.count_gap
+			var health_bar := Rect2(0,health_bar_y,style.body_size.x,6.0)
+			if health_known:
+				draw_rect(health_bar,Color(0.15,0.15,0.15))
+				health_bar.size.x *= health_ratio
+				draw_rect(health_bar,Color(1.0,0.25,0.15) if is_enemy else Color(0.2,0.85,0.35))
 	var symbol := "⊘" if is_order and invalid_destination else style.symbol_for(unit_kind,armed)
 	var width := font.get_string_size(symbol,HORIZONTAL_ALIGNMENT_LEFT,-1,style.font_size).x
 	var texture := style.texture_for(unit_kind,armed)
@@ -87,4 +138,7 @@ func _draw() -> void:
 	if not is_order and unit_kind == UnitDefinition.UnitType.INFANTRY and member_count >= 0:
 		var count := str(member_count)
 		var count_width := font.get_string_size(count,HORIZONTAL_ALIGNMENT_LEFT,-1,style.count_font_size).x
-		draw_string(font,Vector2((style.body_size.x-count_width)/2,style.body_size.y+style.count_font_size+style.count_gap),count,HORIZONTAL_ALIGNMENT_LEFT,-1,style.count_font_size,Color.WHITE)
+		var count_baseline := style.body_size.y+style.count_font_size+style.count_gap
+		if viewer_player_id >= 0 or has_fire_progress:
+			count_baseline += 3.0+style.count_gap
+		draw_string(font,Vector2((style.body_size.x-count_width)/2,count_baseline),count,HORIZONTAL_ALIGNMENT_LEFT,-1,style.count_font_size,Color.WHITE)

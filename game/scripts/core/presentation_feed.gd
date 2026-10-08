@@ -21,6 +21,7 @@ signal unit_status_received(state: Dictionary)
 signal unit_identity_received(unit_id: int, player_id: int, definition_id: String)
 signal unit_member_count_received(unit_id: int, count: int)
 var live_structures: Dictionary[int, Dictionary] = {}
+var _retired_units: Dictionary = {}
 signal weapon_fire_received(event: Dictionary)
 signal projectile_spawn_received(event: Dictionary)
 signal projectile_terminal_received(event: Dictionary)
@@ -41,6 +42,7 @@ func _init() -> void:
 
 func _clear_structures() -> void:
 	live_structures.clear()
+	_retired_units.clear()
 	_fire_sequences.clear()
 	live_projectiles.clear()
 	projectile_buffers.clear()
@@ -99,6 +101,7 @@ func projectile_velocity(id: String, authority_time: float) -> Vector3:
 
 func _remove_structure(id: int) -> void:
 	live_structures.erase(id)
+	_retired_units[id] = true
 	for key: String in _fire_sequences.keys():
 		if key.begins_with(str(id)+"/"): _fire_sequences.erase(key)
 
@@ -111,6 +114,7 @@ func apply_fire_event(event: Dictionary) -> void:
 	weapon_fire_received.emit(event.duplicate(true)) # Presentation only; no ammunition/HP access.
 
 func apply_live_structure(state: Dictionary) -> void:
+	if _retired_units.has(int(state.get("unit_id",0))): return
 	live_structures[int(state.unit_id)] = state.duplicate(true)
 	unit_structure_received.emit(state.duplicate(true))
 	var count := 0
@@ -118,8 +122,13 @@ func apply_live_structure(state: Dictionary) -> void:
 		if member.health > 0: count += 1
 	unit_member_count_received.emit(int(state.unit_id),count)
 
+func apply_live_status(state: Dictionary) -> void:
+	if _retired_units.has(int(state.get("unit_id",0))): return
+	unit_status_received.emit(state.duplicate(true))
+
 
 func apply_live_unit(state: Dictionary) -> void:
+	if _retired_units.has(int(state.get("unit_id",0))): return
 	unit_spawn_received.emit(state.unit_id, state.owner_peer_id, state.position)
 	unit_identity_received.emit(state.unit_id,int(state.get("owner_player_id",0)),str(state.get("definition_id","")))
 	if state.has("member_count"): unit_member_count_received.emit(state.unit_id,int(state.member_count))

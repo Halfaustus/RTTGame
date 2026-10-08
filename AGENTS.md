@@ -1,270 +1,148 @@
-# GreyLine Taskforce Development Instructions
+## 长期开发授权与风险边界
 
-## Document responsibilities and priority
+### 默认授权
 
-- Development constraints regulate workflow, authorization, verification, version control, change management and delivery. They must not contain unit configurations, balance values, game mechanics, UI layouts or stage feature design. Current stage and pause status belong in the actual repository HANDOFF.md; do not fix them in this file.
-- docs/constraints/DESIGN_BASELINE.md is the sole entrypoint for current game rules; its explicitly listed normative modules form that baseline and are not independent authorities. docs/RTTGame_DESIGN_PRINCIPLES.md explains design intent, roles, balance targets and rationale; it does not independently authorize implementation or override the baseline. Read the actual working-tree file and its identifier; do not reconstruct missing design from chat summaries, historical implementation or old stage documents.
-- docs/records/HANDOFF.md records actual implementation, verification, limitations and handoff. It is not a source of new design authorization. Historical records retain their original context and do not override the latest baseline.
-- Within project documents, applicable development constraints take precedence over the design baseline. If they conflict, obey the constraints and report the conflict and impact. This does not permit inserting game design into constraints to override the baseline. Explicit user instructions govern the authorized task.
-- Record the provenance, scope, limits and stage of autonomous choices. Distinguish formal values, explicitly authorized test configuration, temporary parameters and implementation details. Missing original authorization must be marked as not found; code existence, test success and handoff prose are not approval.
-- The existing test-instance authorization does not authorize development during a pause, changing its framework or known formal values, or retroactively approving earlier decisions. Do not promote temporary values to formal design without explicit authorization.
-- When a constraint contains a still-effective game-design decision, removing it from this file does not revoke that decision. If the user explicitly authorizes writing it into the baseline, do so and report the result. Otherwise report the decision and its current source, retain it as a current unresolved item, and request only the missing disposition when necessary. Do not implement the opposite behavior or classify an active rule as disposable history. A newer explicit user decision may supersede it.
+在用户提出的项目目标和任务范围内，agent 默认获得持续有效的开发授权，应自主完成读取、分析、规划、实现、验证、纠错和迭代，直到任务完成或遇到确实无法自行解决的阻塞。
 
-## Autonomous design authorization review maintenance
+授权涵盖项目源码、配置、资源、文档和测试的读取、创建、修改、重构、移动、替换与删除，以及依赖管理、构建、导入、测试、调试和常规开发命令。允许按验证需要启动、停止本任务的本地客户端和独立服务器，包括窗口及无窗口模式。
 
-AUTONOMOUS_DESIGN_REVIEW.md at the repository root is a separate checklist for manual review of autonomous design authorization.
+用户已专项授权今后为本项目人工验证启动客户端和必要的本地独立服务器，包括需要沙箱外执行的桌面窗口启动，无需重复取得项目授权。此授权不取消平台审批机制；优先复用针对固定项目启动脚本的持久批准规则，不申请通用 shell 执行权限，不扩大到其他沙箱外操作。
 
-Whenever the user explicitly states that Codex may design autonomously, automatically update the checklist to record the source, scope, limits and decisions made under that authorization. If no decisions have been made at the time of authorization, mark them as not yet designed; add decisions actually made within the same authorized task when delivering the task.
+上述行为是示例，不是封闭白名单。完成任务合理必要的同类工程操作、跨文件修改及依赖修复，均包含在默认授权中，不得因未逐项列出而反复要求人工确认。
 
-Except for checklist maintenance tasks explicitly authorized by the user, do not add, modify, delete, reorganize, archive or automatically refresh the checklist without new explicit authorization for autonomous design. Continued use of existing authorization, baseline updates, implementation changes, passing tests, routine handoffs and the absence of user objections do not trigger checklist updates.
+未经用户明确批准，不得创建 Git 提交。向既有开发仓库进行非强制推送的授权不免除提交审批要求，且不得触发生产部署、泄露敏感信息或覆盖他人工作。
 
-The checklist is solely for the user's manual review. It is not a design baseline, development instruction, source of execution authorization or basis for automatic acceptance. Its records do not automatically formalize temporary designs, lift a pause or expand development scope.
+### 自主执行要求
 
-Keep the checklist body separate; do not merge it into the baseline, HANDOFF or other files. Inspection tasks may read it, but must not modify it without update authorization.
+计划、架构说明、任务卡、就绪检查、进度汇报和测试报告用于记录与质量控制，不构成逐步骤审批门槛。
 
-## Current documents and history
+不得仅因文件数量较多、需要重构、需要删除可恢复的旧资源、需要启动测试进程、命令失败或需要重试而请求再次授权。
 
-- docs/constraints/DESIGN_BASELINE.md and docs/records/HANDOFF.md are current-state documents. Neither file is required or permitted to accumulate historical records: do not keep change logs, superseded rules, resolved-conflict histories, per-stage result ledgers, past handoff narratives or chronological work logs in them.
-- Keep the baseline limited to current effective design, explicit pending decisions and unresolved conflicts. Replace superseded wording directly; remove resolved conflict entries after updating the effective rules. Keep its current identifier and applicable metadata without appending a version history.
-- Keep HANDOFF limited to current implementation status, key verification conclusions, active limitations and blockers, current authorization boundaries, the authorized next step and necessary links. Remove resolved or superseded entries instead of adding another historical paragraph. Current unverified acceptance items are active status and must remain visible.
-- No separate preservation of removed history is required: do not create or update history files, append archives, or migrate old narratives merely to retain them. Historical logs, superseded rules and resolved issues may be removed from these two current-state documents without another archival step. Existing Git history needs no additional copy.
-- This cleanup does not authorize deleting separate files, frozen fixtures, source code or unrelated project data. Current effective rules, unresolved authorization evidence, active blockers and unverified acceptance obligations are not historical clutter; retain the information needed for current decisions.
-- Update current summaries each round and keep them easy for a new agent to read; do not impose a mechanical word limit. Documentation checks do not constitute gameplay or manual acceptance.
+已有授权在相同目标和范围内持续有效，不因会话切换、任务状态变化或阶段性汇报而失效。必要工程选择由 agent 自主决定，并在交付时说明实质变化和验证结果。
 
-## Project
+保留项目架构、正式数据、接口契约、原创性、隐私及测试要求。不得将临时测试值自动转为正式数据，不得通过删除断言、重建冻结夹具或降低验收标准掩盖失败。
 
-GreyLine Taskforce / 灰线战术群 (internal codename: GREYLINE / 灰线; historical repository identifier: RTTGame) is a real-time tactics game built with Godot 4.7.2.
+确实缺少玩法、正式数值或其他产品决策时，先完成可独立推进的工作，再集中提出缺失决策；不将普通工程选择包装为审批请求。明确暂停、延期和范围排除继续有效。
 
-Project naming is maintained in docs/PROJECT_NAMING.md. Branding does not authorize renaming compatibility-sensitive identifiers or changing gameplay.
+### 少数高风险操作
 
-Primary language: GDScript.
+以下操作不属于默认授权，执行前必须取得针对具体目标、范围和影响的明确授权；已有同范围专项授权无需重复请求：
 
-Target platforms:
-- Windows client
-- Linux dedicated server
+1. 可能造成不可恢复损失的操作，包括删除仓库、清空磁盘或数据库、丢弃无恢复副本的未提交成果。
+2. 改写共享 Git 历史、强制推送或删除包含独有成果的分支。
+3. 生产部署、正式公开发布、软件包发布、生产数据迁移。
+4. 变更账户权限、访问控制、安全策略、计费设置，或对外部用户、服务及第三方产生重大影响的操作。
 
-The project is designed around multiplayer from the beginning.
+禁止将密码、令牌、私钥等敏感凭据写入代码、日志或公开内容。凭据向其预定服务的正常认证使用不需要逐次确认；向其他目的地转移敏感信息必须核实合法授权、接收方、用途和安全渠道，禁止的披露不得执行。
 
-## Architecture
+可恢复的项目文件删除、旧资源替换和任务自有临时文件清理，不等同于不可恢复破坏，应在核对引用和恢复方式后自主完成。
 
-Use an authoritative dedicated-server architecture.
+### 阻塞与环境权限
 
-The server owns authoritative simulation state.
+确需确认时，先完成安全且已授权的准备工作，提供具体操作、目标、影响和恢复限制，只暂停受影响部分。
 
-Clients send commands and requests to the server.
+用户已授权将封闭、可收窄的运行环境权限用于本项目开发。该授权以运行环境能够强制限定具体资源、操作和权限上限为前提；agent可在既定边界内派生更小权限，完成任务合理必要的操作，无需逐项重复取得项目授权。不得因权限错误、命令失败或重试扩大访问目标、操作范围或权限上限。
 
-Clients must never directly determine authoritative:
-- damage
-- unit health
-- armor state
-- suppression state
-- module damage
-- ammunition
-- supply
-- repair state
-- unit ownership
+每次使用上述授权时，应核对环境实际提供的权限边界，采用完成任务所需的最小范围。AGENTS.md本身不授予操作系统或沙箱权限；以当前账户全部权限执行的普通“沙箱外执行”不能仅凭本文件认定为封闭授权，仍须遵循平台的审批机制。不能强制限定范围的操作，不自动纳入此项环境授权。
 
-The server validates commands, advances simulation, and replicates results.
+本说明不能覆盖操作系统、运行环境沙箱、网络策略、连接器权限或组织强制政策。遇到环境限制时使用正常授权机制或允许的替代方案，不得绕过访问控制。
 
-Do not assume the server is also a player.
+如果仍需用户处理，应明确说明是项目决策缺失还是运行环境限制，并指出具体受阻操作，避免重复提出笼统授权请求。
 
-The same Godot project must support both client and headless dedicated-server modes.
+# RTT Development Workflow
 
-## Code separation
+## Roles
 
-Keep simulation logic separate from presentation logic.
+- Main coordinator: GPT-6.1 Sol, Medium by default and High for complex tasks
+- Implementation worker: GPT-6.1 Sol, Medium by default and High for complex tasks
+- Independent reviewer: GPT-6 Luna with Medium for ordinary tasks; GPT-6.1 Sol with High for complex or high-risk tasks
 
-Simulation code must not depend on:
-- camera
-- HUD
-- visual effects
-- audio
-- local player input
+The global setting `agents.max_concurrent_threads_per_session = 5` allows up
+to five concurrent subagents, excluding the main coordinator (six agents in
+total). These responsibilities do not require named custom-agent definitions
+and do not impose an instance limit. Respect any lower runtime limit.
+Only parallelize independent tasks with non-overlapping file scopes; prefer
+sequential execution when tasks share files.
 
-Do not place unrelated systems into one large Unit script.
+## Workflow
 
-Prefer composition and dedicated systems.
+For development tasks, follow this process:
 
-Major gameplay domains include:
+### Phase 1: Planning (Sol)
 
-- units
-- movement
-- combat
-- armor
-- suppression
-- module damage
-- logistics
-- repair
-- networking
+1. Inspect the relevant code and dependencies.
+2. Identify requirements and constraints.
+3. Prepare a minimal implementation plan.
+4. Split work into small, independent tasks.
+5. Define allowed files and acceptance criteria.
 
-## Networking
+Do not delegate ambiguous tasks.
 
-Use Godot MultiplayerAPI.
+### Phase 2: Implementation (Sol)
 
-Initial transport:
-ENet.
+1. Delegate suitable coding tasks to an implementation subagent.
+2. Supply the relevant plan and file scope.
+3. Require focused changes and tests.
+4. Collect the implementation report.
 
-Command authority and replication responsibilities follow "Architecture" above.
+Prefer sequential execution when tasks share files.
 
-Network messages should use explicit and stable data structures.
+If the task involves complex architecture, networking,
+or deterministic simulation, Sol may implement it directly.
 
-## Gameplay data
+### Phase 3: Independent Review (Luna / Sol)
 
-### Third-party research and originality
+1. Delegate the completed implementation to an independent review subagent.
+2. Check changes against the plan.
+3. Inspect tests and relevant regressions.
+4. For CHANGES REQUIRED, send bounded corrections to the implementation subagent.
+5. For BLOCKED, resolve the design conflict, missing decision or validation blocker before proceeding.
+6. Perform incremental review after corrections.
 
-- Broken Arrow materials are read-only research inputs in a logically isolated Reference Layer. They are not reusable or publishable project assets. Production code, configuration and resources must be independently authored from this project's requirements.
-- Do not copy, translate, convert, rename or lightly alter third-party code, decompiled implementation, assets, text, complete databases/value tables, internal identifiers, map deployments, timestamps, event sequences or mission trigger chains into production. Renaming, random perturbation, percentage adjustment, scaling and unit conversion do not establish originality.
-- Use statistical observations and abstract principles, then this project's goals, independent mathematical models and independently generated parameters. Record this derivation and provenance. Public facts may be distinguished from the reference game's particular expression and parameter combinations. Missing provenance is not approval.
-- Research missions through pressure, decisions and resource pacing; independently design terrain, objectives, decision paths, stage order, threats, forces, reinforcement, victory conditions and transitions. Reduce implementation references to functional requirements before independently designing inputs, outputs, algorithms, structures and tests.
-- Before producing content influenced by third-party references, check for copied data; renamed counterparts; lightly adjusted values; retained coordinates/times/events; copied mission/trigger structure; reused code structure/internal names; original text; ability to reconstruct substantial original content; an explainable independent process; and whether the result can be derived after removing all original reference data. Any of the first eight findings prohibits production use; failure of the last requires rebuilding the independent model.
-- Assess each research use as LOW (abstract principles/public facts/independent implementation), MEDIUM (specific references substantially abstracted and remodelled), or HIGH (raw parameters, direct mappings, mission/script structure or close implementation). HIGH results must become abstract requirements before independent regeneration. Uncertain provenance remains research-only. Requests for fidelity or internal use do not waive these constraints.
-- For visibly reference-inspired outputs, report observation, abstract principle, original proposal and self-check. Do not directly copy/export/convert Reference Layer files into production; exclude local raw research from publication and version-control delivery. Research may influence ideas, not serve as the resulting product assets.
-
-Prefer data-driven definitions over hard-coded unit statistics.
-
-Unit, weapon, armor and faction definitions should be stored separately from runtime behavior.
-
-Do not hard-code balance values throughout gameplay scripts.
-
-## Development process
-
-Use root TASK_WORKFLOW.md, TASK_TEMPLATE.md and TASKS.md for task preparation and tracking; detailed cards live in docs/tasks/. Read the actual current task, HANDOFF, relevant baseline modules and applicable DATA before execution. Record DoR and authorization separately: Dev Ready does not authorize implementation or lift a pause. Register out-of-scope issues and dependencies, review relevant baseline/DATA changes, and synchronize verification evidence, TASKS and HANDOFF before closing a task. These workflow files do not override these constraints or authorize design decisions.
-
-Before implementing a non-trivial feature:
-
-1. Inspect the existing implementation.
-2. Explain the proposed architecture.
-3. Identify affected files.
-4. Implement the smallest functional version.
-5. Run relevant tests.
-6. Report what changed and any remaining limitations.
-
-Prefer small, reviewable changes.
-
-Do not launch windowed or headless clients for testing unless the user explicitly requests client tests.
-Use static checks, editor imports, and isolated simulation tests by default.
-
-Do not perform broad refactors unless required.
-
-Do not modify unrelated files.
-
-Do not delete assets or project data without explicit instruction.
-
-## Git
-
-Do not rewrite Git history.
-
-Do not force push.
-
-Do not delete branches.
-
-Do not commit generated build artifacts.
-
-Keep commits focused on one logical change where practical.
-
-Commit and push require explicit user authorization for each operation. Summary and verification conventions are defined in "Verification and reporting conventions".
-
-## Performance
-
-Do not prematurely optimize.
-
-Use Godot Profiler before introducing complex optimizations.
-
-Avoid unnecessary per-frame work.
-
-Systems expected to scale with unit count should be designed with profiling and batching in mind.
-
-## Scope and authorization
-
-- Take the current implementation stage and verification status from docs/records/HANDOFF.md and actual evidence; do not store stage progress or gameplay rules in this file.
-- Start or resume implementation only within the user's current authorized scope. A later pause overrides earlier development authorization; do not choose the next stage automatically.
-- Preserve existing results, interfaces and uncommitted work. Report incompatible design changes before changing code, configuration or tests; a documentation audit does not authorize implementation repair.
-- Preserve authenticated ownership and private-state boundaries. Do not use connection identities as substitutes for domain identities or expose private state through unrelated replication or replay channels.
-- When changing execution order or compatibility-sensitive interfaces, establish the existing contract and verify the affected frozen replay boundaries. Do not silently change those contracts.
-- Only still-effective acceptance obligations and unresolved project decisions remain current review items. Completed, superseded or resolved records do not require archival retention. Removing text does not by itself authorize deleting code, fixtures or changing the corresponding game behavior.
-
-## Replay compatibility
-
-Every major development release (including new Prototype 0.x stages) MUST run replay
-compatibility validation before acceptance. Keep frozen fixtures for each supported
-format version and run their read, validation, round-trip, checkpoint/event-boundary,
-and presentation checks. Do not regenerate old fixtures to make a failing check pass.
-
-Changes to replay structure or field semantics require an explicit format-version
-decision, documented compatibility/migration policy, and a new fixture when needed.
-Unknown format versions must fail clearly; never silently load them as the current version.
-Map/rules identifiers and content fingerprints must be checked before a future player
-loads presentation assets. State/event replay must never depend on input resimulation,
-live connections, local AI, damage calculation, or authoritative spawning.
-
-Report supported/unsupported versions, automatic results, and unverified manual items
-separately. Successful serialization tests are not full replay recording or playback acceptance.
-
-## Verification and reporting conventions
-
-### Required form of manual review
-
-- Unless the user explicitly specifies another form, every manual review, inspection, recheck or acceptance must be provided as a complete setup with two real clients and an independent authoritative server. Provide the setup/start/stop instructions, a checklist with actions and expected results, actual status, and evidence for client A, client B and the server.
-- Do not simplify this form for any reason. An isolated inspector, single client, local simulation, headless simulation test or static/documentation check cannot replace any part of the required manual review. These may only be supplementary evidence.
-- If the complete setup, necessary test objects, observability or verification entrypoints are unavailable, record the affected manual items as blocked/not verified and prepare the missing requirements within the authorized scope. Do not substitute a simpler form or claim acceptance. Only an explicit user instruction specifying another form changes this requirement; do not infer an exception from urgency, cost, technical difficulty or earlier tools.
-- This governs the form of manual review; it does not automatically require manual review for every minor version, authorize gameplay outside the current task, or authorize the agent to launch clients without an explicit client-test request. When the user requests manual review without specifying its form, provide the complete two-client-plus-server form and checklist.
-
-The following conventions replace the previous requirement to "output only a manual verification checklist, verification evidence and start/stop commands in each round."
-Minor versions refer to stages such as 0.4A and 0.4B; major versions refer to complete versions such as 0.4 and 0.5.
-
-- Minor-version development requires only relevant automatic verification and necessary regression checks by default. Manual acceptance is not required by default; omit a manual verification checklist and detailed start/stop commands unless the user requests manual review. If requested, follow "Required form of manual review" above.
-- Perform manual acceptance at the end of each major version. At that point, provide a complete manual verification checklist (steps, expected results and actual status), verification evidence and exact start/stop commands.
-- The final response for a minor version only needs a brief summary of completed work, automatic verification results, known limitations and the next step.
-- Record automatic verification and manual acceptance separately. If manual acceptance has not been performed, do not claim that it passed or that the entire major version has been accepted; passing automatic verification does not mean passing manual acceptance.
-- Each major version must still undergo compatibility checks using the existing frozen replay fixtures and comply with the Replay compatibility constraints above. Minor versions that affect compatibility must undergo the relevant automatic regression checks.
-- "Submit a minor-version summary" means outputting a summary only; it does not authorize Git commit or push.
-
-## Design baseline
-
-- Default to the latest confirmed effective baseline in docs/constraints/DESIGN_BASELINE.md and its explicitly listed normative modules, unless the user explicitly designates a stable version. Record any designated version and scope; do not infer a baseline from drafts, larger identifiers, chat summaries or unavailable historical files. Review affected tasks when the baseline changes. Version selection does not grant implementation authorization or lift a pause.
-
-- Validate capabilities, command eligibility and configuration against the actual baseline and explicit authorization. Report missing implementations; do not silently grant unsupported capabilities.
-
-- From 0.5B, fill missing non-principled implementation parameters with the
-  smallest functional configuration. Never override formal values, invent
-  mechanisms, change authority/economy/unit semantics or expand stage scope.
-  Centralize parameters and report each name/value/purpose/rationale and whether
-  adjustment is suggested at minor-version closure. Unopposed values may carry
-  forward without asking again, but are not permanent design; later confirmed
-  DATA values take precedence. Missing design decisions/conflicts must be reported. Explicit authorization for test instances may permit choices beyond numerical parameter completion, but only inside its stated framework, stage and limits; never infer that authorization from existing code or passing tests.
-- Before each major version, read the actual baseline entrypoint and all modules relevant to the authorized stage, and establish its scope. Minor versions inherit it. Read relevant changes whenever the user explicitly updates the baseline; never assemble design from other conversations. A development roadmap proposes sequencing and does not authorize starting or resuming a stage.
-- Report missing or conflicting design; do not invent additions. HANDOFF.md records actual implementation and validation status.
-
-## Existing test-instance authorization
-
-Since DB-2026-10-04-21, unless the user explicitly revokes, prohibits or narrows it, Codex may autonomously create test units of any type, weapon squads and test configurations within the user's existing defined framework without individual approval. Within permitted fields, ranges and rules, this covers not-yet-determined instance parameters such as personnel count, protection, roles, weapons, ammunition, range, damage, penetration, suppression, dispersion, aiming, rate of fire and reload time.
-
-This authorization does not permit changing, extending, deleting or reinterpreting the defined framework, including unit and weapon attributes, damage formulas, transport rules, capability tag categories, weapon slots or other confirmed mechanics. Test needs do not override formal rules, general values or confirmed independent weapon performance. Objects explicitly marked as test-only may be adjusted or removed within the same framework.
-
-Every autonomously created object not formally confirmed by the user must be recognizably marked as test-only in data, documentation, prototype/handoff records or a test interface. Implementation, repeated use and successful verification do not formalize it. It may be removed during formal-release cleanup; only explicit user confirmation makes it formal design.
-
-This section preserves existing authorization moved from DB-2026-10-05-27. The document split is not new autonomous-design authorization, does not trigger an update to AUTONOMOUS_DESIGN_REVIEW.md and does not lift any pause.
-
-## Current task scope lookup
-
-Read current scope, deferrals and pause/resume status from explicit user instructions and the actual repository HANDOFF.md. Carried source records in docs/DEVELOPMENT_CONTEXT.md preserve unresolved context for reconciliation; they are not a verified repository handoff and do not authorize resuming work. Do not remove an effective restriction merely because it was moved between documents.
-
-## Baseline document maintenance details
-
-Prompts specify the current task scope and new changes; do not duplicate the complete rules into another baseline. For unresolved baseline conflicts, record the conflicting clauses, reason, applicable scope, current handling and pending confirmation in the baseline's listed PENDING_DECISIONS.md section 22; do not duplicate the register in its entrypoint. After resolution, update effective rules and remove the current conflict entry without creating a history archive. Do not fabricate HANDOFF progress or claim a document change has been applied to an unknown repository.
-
-## Confirmed DATA and missing configuration
-
-Use docs/RTT_GAME_DATA.xlsx for confirmed instance data and the baseline for game mechanisms and mechanism constants. Preserve user-confirmed configurations and their recorded values even when some fields remain incomplete. Do not reclassify a confirmed object as a test fixture solely because it was previously used for validation.
-
-"Unconfigured" (the workbook's first missing-value marker) means the field applies but still needs configuration. "Not applicable" (the workbook's second marker) means the field does not apply to that object. Neither means zero. Do not automatically supply values, treat missing configuration as an enabled capability or promote temporary test values to confirmed data. Keep authorized temporary/test configurations outside formal DATA, explicitly identified.
-
-## Existing implementation constraints
-
-Preserve the implementation constraints below that were moved from the baseline. Moving them does not authorize an implementation refactor, change gameplay rules or lift a pause.
-
-- Precompute and cache kinetic decay coefficients at load/configuration initialization. Evaluate penetration on impact, not on every flight frame. Cache ammunition references and complete-step gravity increments; share unit motion information per step.
-- For explosions, cache squared radius and inverse squared radius; reuse squared-distance queries. Restrict nearby-object queries and avoid duplicate queries or settlement. Preserve the confirmed squared-distance polynomial rather than changing it to save a multiplication.
-- Manage projectiles centrally in compact reusable storage rather than creating a separate rigid-body/physics node per projectile. Clear source and ignore state on reuse, distinguish slot generations and never silently discard a legal shot because capacity is exhausted.
-- Sample dispersion and solve firing conditions at actual firing time. Update motion, collision paths and distance during flight; calculate impact damage and explosion effects on impact. Use spatial filtering before precise tests; maintain event time order without sorting all live projectiles.
-- Do not introduce ammunition-specific update frequencies, multilevel pools or penetration lookup tables under the existing scope. Do not run unused capability modules or retain unused state. Use the approved analytical vector solution without adding unnecessary angle trigonometry; verify actual weapon orientation through the firing system.
+Review conclusions follow the global AGENTS.md:
+- PASS: the review passed; the coordinator checks acceptance conditions.
+- CHANGES REQUIRED: bounded implementation corrections and incremental review are required.
+- BLOCKED: a design conflict, missing decision or validation blocker requires coordinator resolution.
+
+The main Sol coordinator makes the final decision.
+
+## Project Constraints
+
+- Preserve existing module boundaries.
+- Avoid unrelated refactoring.
+- Do not change save formats without approval.
+- Do not introduce nondeterministic simulation behavior.
+- Protect multiplayer synchronization compatibility.
+- Do not delete user data or discard existing changes.
+- Do not create Git commits without approval.
+
+## Completion Requirements
+
+A task is complete only after:
+- Implementation is finished.
+- Relevant tests pass, or test limitations are reported.
+- The independent review required by the global AGENTS.md passes.
+- Remaining risks are documented.
+
+## Subagent Invocation
+
+Use ordinary subagents with explicit responsibilities and bounded task context;
+do not depend on named custom-agent configuration files. Multi-agent defaults
+and the concurrent-subagent limit remain in the global `config.toml`.
+
+When the runtime supports explicit model and reasoning-effort selection, use
+`gpt-6.1-sol` for implementation, `gpt-6-luna` with Medium for ordinary
+independent review, and `gpt-6.1-sol` with High for complex/high-risk review,
+following the latest global AGENTS.md. Use Medium by default and High for
+complex implementation. These instructions do not change the live model or
+global config.toml; report the actual tool invocation rather than a target setting. Respect the runtime's context-forking
+requirements when supplying overrides. A task name alone does not select a
+model or load instructions. Provide the corresponding responsibility boundaries
+explicitly. Use a fresh review context containing the plan, file scope,
+acceptance criteria and validation evidence; the reviewer must independently
+inspect actual changes, remain read-only, and return PASS, CHANGES REQUIRED
+or BLOCKED.
+
+If the required model or delegation tool is unavailable, report the limitation
+and leave the independent-review requirement pending. Do not report coordinator
+self-review as a passed independent review.

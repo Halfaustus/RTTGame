@@ -19,6 +19,13 @@ var profile := {"events":0,"candidate_builds":0,"candidate_visits":0,"source_upd
 
 func _init(state: UnitState) -> void:
 	owner = weakref(state)
+	# One shared runtime channel represents every allocation of a model. Preserve
+	# an explicit primary declaration from any source across operator handoffs.
+	var primary_by_model := {}
+	for allocation: WeaponAllocation in state.definition.weapon_allocations:
+		if allocation.node_kind != WeaponAllocation.NodeKind.SOLDIER or allocation.definition == null: continue
+		var model := allocation.definition.definition_id
+		primary_by_model[model] = bool(primary_by_model.get(model,false) or allocation.primary_weapon or allocation.armored_primary_weapon)
 	for allocation: WeaponAllocation in state.definition.weapon_allocations:
 		if allocation.node_kind != WeaponAllocation.NodeKind.SOLDIER: continue
 		var model := allocation.definition.definition_id
@@ -27,6 +34,8 @@ func _init(state: UnitState) -> void:
 		slot_definition.slot_id = allocation.slot_id
 		slot_definition.weapon = allocation.definition
 		slot_definition.direction_primary = allocation.direction_primary
+		slot_definition.primary_weapon = bool(primary_by_model.get(model,false))
+		slot_definition.armored_primary_weapon = bool(primary_by_model.get(model,false))
 		slot_definition.orientation_priority = allocation.orientation_priority
 		var slot := WeaponSlotState.new(slot_definition,allocation.node_kind,str(allocation.member_id))
 		state.runtime_slots.append(slot)

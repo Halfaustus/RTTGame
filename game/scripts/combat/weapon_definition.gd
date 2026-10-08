@@ -5,6 +5,7 @@ enum TargetType { INFANTRY, GROUND_VEHICLE, HELICOPTER, FIXED_WING, FORTIFICATIO
 
 # -1 / empty explicitly mean undefined, never a zero-time/8-metre fallback.
 @export var definition_id: String = ""
+@export var caliber_mm := -1.0 # Missing caliber cannot be inferred from names/weapon IDs.
 @export var required_operators: int = -1
 @export var maximum_squad_count: int = -1 # DATA constraint; -1 means not specified.
 @export var squad_weapon := false

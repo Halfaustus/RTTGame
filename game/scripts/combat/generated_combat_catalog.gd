@@ -27,6 +27,7 @@ static func squad() -> UnitDefinition:
 		if i > 1: weapon = unit.weapon_allocations[1].definition
 		var allocation := WeaponAllocation.new()
 		allocation.definition = weapon
+		allocation.primary_weapon = true # TEST ONLY: every allocated model is an explicit marker primary.
 		allocation.member_id = i+1
 		allocation.retention_priority = 0 if weapon.squad_weapon else 1
 		allocation.initial_inventory = data.initial_inventory_for_weapon(weapon.definition_id).inventory
@@ -53,6 +54,7 @@ static func mortar() -> UnitDefinition:
 	weapon.temporary_fields.assign(["test_only:aim","test_only:capacity","test_only:reload","test_only:attack_types","test_only:ignore","test_only:spread"])
 	var allocation := WeaponAllocation.new()
 	allocation.definition = weapon
+	allocation.primary_weapon = true # TEST ONLY: mortar marker primary declaration.
 	allocation.member_id = 1
 	allocation.retention_priority = 0
 	allocation.initial_inventory = data.initial_inventory_for_weapon(weapon.definition_id).inventory

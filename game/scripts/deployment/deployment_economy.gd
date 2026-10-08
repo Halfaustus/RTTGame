@@ -154,6 +154,14 @@ func remove_live_unit(unit_id: int) -> void:
 		_units.erase(unit_id)
 		state_changed.emit(player_id)
 
+func value_for_definition(definition: UnitDefinition) -> Variant:
+	# Value and sortie cost are independent. Missing value stays unconfigured.
+	if definition == null: return null
+	for entry: Dictionary in _catalog.values():
+		if entry.definition == definition or (not definition.resource_path.is_empty() and entry.definition.resource_path == definition.resource_path):
+			return entry.value_points
+	return null
+
 
 func request_order(player_id: int, config_id: String, point_id: String, destination: Vector3, held: bool = false) -> Dictionary:
 	if not _accounts.has(player_id):

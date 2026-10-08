@@ -103,12 +103,14 @@ static func definition(name: String) -> UnitDefinition:
 		var allocation := WeaponAllocation.new()
 		allocation.definition = weapon
 		allocation.member_id = 1 # Supported single-operator, single-entry fixture only.
+		allocation.primary_weapon = true # TEST ONLY: the sole configured weapon is the marker primary.
 		if vehicle:
 			var installations: Variant = _document.get("installations",{}).get(body.id)
 			if not installations is Array or installations.size() != 1 or installations[0].Kind != "hull" or installations[0].Index != "1" or entry.MountKind != "hull" or entry.MountIndex != "1" or entry.InstallationId != installations[0].Id: return null
 			allocation.node_kind = WeaponAllocation.NodeKind.HULL
 			allocation.member_id = 0
 			allocation.slot_id = "hull"
+			allocation.armored_primary_weapon = true # TEST ONLY compatibility alias for existing armor fixtures.
 		allocation.retention_priority = 0
 		for ammo_id: String in entry.Inventory: allocation.initial_inventory[ammo_id] = int(entry.Inventory[ammo_id])
 		unit.weapon_allocations.append(allocation)

@@ -117,6 +117,7 @@ func _weapon_from_record(id: String) -> WeaponDefinition:
 	if row.is_empty(): return null
 	var value := WeaponDefinition.new()
 	value.definition_id = id
+	value.caliber_mm = number(row,"Caliber_mm") # Absent formal field remains NAN.
 	value.data_source = "DB40:RTT_GAME_DATA.xlsx"
 	var operators := number(row,"Required_Operators")
 	value.required_operators = int(operators) if is_finite(operators) else -1

@@ -52,6 +52,10 @@ var _hud_dirty := true
 var _control_groups := BattleControlGroups.new()
 var _menu: Control
 var _task_overlay: TaskQueueOverlay
+var _menu_page := "home"
+var _combat_overview: Dictionary = {}
+var _has_combat_overview := false
+var _combat_records_tab := "kills"
 
 @onready var _units: Node3D = $Units
 @onready var _camera: Camera3D = $Units/Camera3D
@@ -103,15 +107,11 @@ func _ready() -> void:
 	presentation_source.unit_status_received.connect(func(status: Dictionary):
 		if not _unit_markers.has(int(status.unit_id)): return
 		var marker: UnitMarker = _unit_markers[int(status.unit_id)]
-		marker.personnel_state = status.personnel_state
-		marker.module_levels = status.get("modules",[])
-		marker.refresh())
+		marker.apply_status(status))
 	presentation_source.unit_structure_received.connect(func(structure: Dictionary):
 		if not structure.has("personnel") or not _unit_markers.has(int(structure.unit_id)): return
 		var marker: UnitMarker = _unit_markers[int(structure.unit_id)]
-		marker.personnel_state = structure.personnel.state
-		marker.module_levels = structure.get("modules",[])
-		marker.refresh())
+		marker.apply_status(UnitStatusProjection.project(structure,true)))
 	if not replay_mode:
 		multiplayer.server_disconnected.connect(_clear_selection)
 		multiplayer.server_disconnected.connect(_clear_movement_paths)
@@ -169,11 +169,16 @@ func _ready() -> void:
 		_task_overlay.units = _visual_units
 		overlay.add_child(_task_overlay)
 		NetworkManager.task_queue_received.connect(func(_rows): _task_overlay.queues = NetworkManager.local_task_queues; _task_overlay.queue_redraw())
+		NetworkManager.combat_statistics_received.connect(func(_statistics): _refresh_combat_statistics())
+		if NetworkManager.has_signal("combat_overview_received"):
+			NetworkManager.connect("combat_overview_received", _on_combat_overview_received)
+		multiplayer.server_disconnected.connect(_clear_combat_overview)
 		if "--server" not in OS.get_cmdline_user_args() and "--test-role=server" not in OS.get_cmdline_user_args():
 			_battle_hud = BattleHUD.new()
 			overlay.add_child(_battle_hud)
 			_battle_hud.configure_map(Rect2(movement_config.minimum_xz, movement_config.maximum_xz - movement_config.minimum_xz))
 			_battle_hud.command_requested.connect(_on_hud_command)
+			_battle_hud.group_requested.connect(_on_hud_group)
 			_battle_hud.unit_requested.connect(_focus_selection_unit)
 			_battle_hud.locate_requested.connect(_locate_disclosed_unit)
 			presentation_source.unit_structure_received.connect(func(_state): _hud_dirty = true)
@@ -212,7 +217,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _handle_world_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.keycode == KEY_ESCAPE and event.pressed and not event.echo:
-		_open_menu()
+		if _menu != null and _menu.visible:
+			_close_menu()
+		else:
+			_open_menu()
 		get_viewport().set_input_as_handled()
 		return
 	if _menu != null and _menu.visible:
@@ -312,39 +320,11 @@ func _handle_world_input(event: InputEvent) -> void:
 
 
 func _open_menu() -> void:
-	# Presentation-only menu; never pauses simulation or cancels a command.
-	var parent := _selection_rectangle.get_parent()
+	# Presentation-only menu; never pauses server simulation.
 	if _menu == null:
-		_menu = Control.new()
-		_menu.name = "GameMenu"
-		_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_menu.mouse_filter = Control.MOUSE_FILTER_STOP
-		_menu.z_index = 100
-		parent.add_child(_menu)
-		var backdrop := ColorRect.new()
-		backdrop.color = Color(0,0,0,0.65)
-		backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_menu.add_child(backdrop)
-		var panel := PanelContainer.new()
-		panel.position = Vector2(24,24)
-		_menu.add_child(panel)
-		var resume := Button.new()
-		resume.name = "ResumeGame"
-		resume.text = "返回游戏"
-		var settings := VBoxContainer.new()
-		panel.add_child(settings)
-		settings.add_child(resume)
-		var title := Label.new()
-		title.text = "设置 · 出生后移动方式"
-		settings.add_child(title)
-		var spawn_mode := OptionButton.new()
-		spawn_mode.name = "SpawnMoveMode"
-		spawn_mode.add_item("常规移动", MovementSimulation.MoveMode.BASIC)
-		spawn_mode.add_item("快速移动", MovementSimulation.MoveMode.FAST)
-		spawn_mode.select(1 if _deployment_ui.spawn_move_mode == MovementSimulation.MoveMode.FAST else 0)
-		spawn_mode.item_selected.connect(func(_index): _deployment_ui.spawn_move_mode = spawn_mode.get_selected_id())
-		settings.add_child(spawn_mode)
-		resume.pressed.connect(func(): _menu.hide(); resume.release_focus(); _camera.input_blocked = false)
+		_build_game_menu()
+	if _deployment_ui != null:
+		_deployment_ui.set_process_input(false)
 	_cancel_drag()
 	_cancel_right_drag()
 	_pending_actions.clear()
@@ -352,6 +332,358 @@ func _open_menu() -> void:
 	_camera.cancel_controls()
 	_camera.input_blocked = true
 	_menu.show()
+	_show_menu_page("home")
+
+
+func _build_game_menu() -> void:
+	_menu = Control.new()
+	_menu.name = "GameMenu"
+	_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_menu.mouse_filter = Control.MOUSE_FILTER_STOP
+	_menu.z_index = 100
+	_selection_rectangle.get_parent().add_child(_menu)
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0, 0, 0, 0.68)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	_menu.add_child(backdrop)
+	var center := CenterContainer.new()
+	center.name = "MenuCenter"
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_PASS
+	_menu.add_child(center)
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	center.add_child(panel)
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 12)
+	panel.add_child(outer)
+	var header := HBoxContainer.new()
+	outer.add_child(header)
+	var title := Label.new()
+	title.name = "MenuTitle"
+	title.text = "游戏菜单"
+	title.add_theme_font_size_override("font_size", 24)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var back := Button.new()
+	back.name = "MenuBack"
+	back.text = "返回菜单"
+	back.pressed.connect(func(): _show_menu_page("home"))
+	header.add_child(back)
+	var page_area := Control.new()
+	page_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	page_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.add_child(page_area)
+	var home := ScrollContainer.new()
+	home.name = "MenuHome"
+	home.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	home.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	page_area.add_child(home)
+	var home_box := VBoxContainer.new()
+	home_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	home_box.add_theme_constant_override("separation", 12)
+	home.add_child(home_box)
+	for entry: Array in [["OutOfMatchSettingsPage", "局外设置"], ["CombatStatisticsPage", "KD"], ["CombatRecordsPage", "击杀记录"]]:
+		var button := Button.new()
+		button.name = str(entry[0])
+		button.text = str(entry[1])
+		button.custom_minimum_size.y = 54
+		button.pressed.connect(_show_menu_page.bind(str(entry[0])))
+		home_box.add_child(button)
+	var settings_scroll := _new_menu_page(page_area, "OutOfMatchSettings")
+	var settings := VBoxContainer.new()
+	settings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	settings_scroll.add_child(settings)
+	var settings_title := Label.new()
+	settings_title.text = "出生后移动方式"
+	settings.add_child(settings_title)
+	var spawn_mode := OptionButton.new()
+	spawn_mode.name = "SpawnMoveMode"
+	spawn_mode.add_item("常规移动", MovementSimulation.MoveMode.BASIC)
+	spawn_mode.add_item("快速移动", MovementSimulation.MoveMode.FAST)
+	spawn_mode.select(1 if _deployment_ui.spawn_move_mode == MovementSimulation.MoveMode.FAST else 0)
+	spawn_mode.item_selected.connect(func(_index: int): _deployment_ui.spawn_move_mode = spawn_mode.get_selected_id())
+	settings.add_child(spawn_mode)
+	var stats_scroll := _new_menu_page(page_area, "CombatStatisticsPageContent")
+	var stats_box := VBoxContainer.new()
+	stats_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_scroll.add_child(stats_box)
+	var stats_label := Label.new()
+	stats_label.name = "CombatStatistics"
+	stats_box.add_child(stats_label)
+	var table := GridContainer.new()
+	table.name = "CombatStatisticsTable"
+	table.columns = 5
+	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_box.add_child(table)
+	stats_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	var records_scroll := _new_menu_page(page_area, "CombatRecordsPageContent")
+	var records_box := VBoxContainer.new()
+	records_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	records_scroll.add_child(records_box)
+	var tabs := HBoxContainer.new()
+	records_box.add_child(tabs)
+	var records_group := ButtonGroup.new()
+	var kills_tab := Button.new()
+	kills_tab.name = "MyUnitKills"
+	kills_tab.text = "我的单位击杀"
+	kills_tab.toggle_mode = true
+	kills_tab.button_group = records_group
+	kills_tab.button_pressed = true
+	kills_tab.pressed.connect(func(): _combat_records_tab = "kills"; _refresh_combat_statistics())
+	tabs.add_child(kills_tab)
+	var deaths_tab := Button.new()
+	deaths_tab.name = "MyUnitDeaths"
+	deaths_tab.text = "我的单位被击杀"
+	deaths_tab.toggle_mode = true
+	deaths_tab.button_group = records_group
+	deaths_tab.pressed.connect(func(): _combat_records_tab = "deaths"; _refresh_combat_statistics())
+	tabs.add_child(deaths_tab)
+	var records := VBoxContainer.new()
+	records.name = "CombatRecords"
+	records.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	records_box.add_child(records)
+	var footer := HBoxContainer.new()
+	footer.name = "MenuFooter"
+	footer.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	footer.alignment = BoxContainer.ALIGNMENT_CENTER
+	footer.mouse_filter = Control.MOUSE_FILTER_PASS
+	_menu.add_child(footer)
+	var resume := Button.new()
+	resume.name = "ResumeGame"
+	resume.text = "返回游戏"
+	resume.pressed.connect(func(): _close_menu(); resume.release_focus())
+	footer.add_child(resume)
+	get_viewport().size_changed.connect(_resize_game_menu_panel.bind(panel, center, footer, resume))
+	_resize_game_menu_panel(panel, center, footer, resume)
+	_menu.hide()
+
+
+func _resize_game_menu_panel(panel: PanelContainer, center: CenterContainer, footer: HBoxContainer, resume: Button) -> void:
+	if not is_instance_valid(panel) or not is_instance_valid(center) or not is_instance_valid(footer) or not is_instance_valid(resume): return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var side_margin := minf(16.0, viewport_size.x * 0.04)
+	var top_margin := minf(16.0, viewport_size.y * 0.04)
+	var bottom_margin := minf(24.0, viewport_size.y * 0.06)
+	var panel_footer_gap := minf(16.0, viewport_size.y * 0.04)
+	var button_width := maxf(1.0, minf(340.0, viewport_size.x - side_margin * 2.0))
+	var button_height := maxf(1.0, minf(64.0, viewport_size.y - top_margin - bottom_margin))
+	resume.custom_minimum_size = Vector2(button_width, button_height)
+	resume.add_theme_font_size_override("font_size", 24 if button_width >= 280.0 else 18)
+	footer.offset_left = side_margin
+	footer.offset_right = -side_margin
+	footer.offset_top = -bottom_margin - button_height
+	footer.offset_bottom = -bottom_margin
+	center.offset_top = top_margin
+	center.offset_bottom = -(button_height + bottom_margin + panel_footer_gap)
+	var available := Vector2(maxf(1.0, viewport_size.x - side_margin * 2.0), maxf(1.0, viewport_size.y - top_margin - button_height - bottom_margin - panel_footer_gap))
+	panel.custom_minimum_size = Vector2(minf(900.0, available.x), minf(640.0, available.y))
+	panel.size = panel.custom_minimum_size
+
+
+func _new_menu_page(parent: Control, page_name: String) -> ScrollContainer:
+	var scroll := ScrollContainer.new()
+	scroll.name = page_name
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.hide()
+	parent.add_child(scroll)
+	return scroll
+
+
+func _show_menu_page(page_name: String) -> void:
+	_menu_page = page_name
+	var title := _menu.find_child("MenuTitle", true, false) as Label
+	var back := _menu.find_child("MenuBack", true, false) as Button
+	var home := _menu.find_child("MenuHome", true, false) as Control
+	var settings := _menu.find_child("OutOfMatchSettings", true, false) as Control
+	var stats := _menu.find_child("CombatStatisticsPageContent", true, false) as Control
+	var records := _menu.find_child("CombatRecordsPageContent", true, false) as Control
+	home.visible = page_name == "home"
+	settings.visible = page_name == "OutOfMatchSettingsPage"
+	stats.visible = page_name == "CombatStatisticsPage"
+	records.visible = page_name == "CombatRecordsPage"
+	back.visible = page_name != "home"
+	match page_name:
+		"OutOfMatchSettingsPage": title.text = "局外设置"
+		"CombatStatisticsPage": title.text = "KD"
+		"CombatRecordsPage": title.text = "击杀记录"
+		_: title.text = "游戏菜单"
+	_refresh_combat_statistics()
+
+
+func _close_menu() -> void:
+	var focus_owner := get_viewport().gui_get_focus_owner()
+	if _menu != null and is_instance_valid(focus_owner) and _menu.is_ancestor_of(focus_owner):
+		focus_owner.release_focus()
+	if _menu != null: _menu.hide()
+	if _deployment_ui != null:
+		_deployment_ui.set_process_input(true)
+	_camera.input_blocked = false
+
+
+func _refresh_combat_statistics() -> void:
+	if _menu == null: return
+	var label := _menu.find_child("CombatStatistics",true,false) as Label
+	if label != null:
+		var statistics := _viewer_combat_player()
+		if statistics.is_empty() and not _has_combat_overview: statistics = NetworkManager.local_combat_statistics
+		if statistics.is_empty():
+			label.text = "价值统计：等待服务器"
+		else:
+			var kd_text := _combat_kd_text(statistics)
+			var death_value: Variant = statistics.get("death_value")
+			label.text = "本机 · 击杀价值 %s · 死亡价值 %s · 价值KD %s" % [_combat_value_text(statistics.get("kill_value")),_combat_value_text(death_value),kd_text]
+	_refresh_combat_statistics_table()
+	_refresh_combat_records()
+
+
+func _refresh_combat_statistics_table() -> void:
+	var table := _menu.find_child("CombatStatisticsTable", true, false) as GridContainer
+	if table == null: return
+	for child: Node in table.get_children():
+		table.remove_child(child)
+		child.queue_free()
+	for heading: String in ["玩家", "击杀价值", "死亡价值", "价值KD", "状态"]:
+		var heading_label := Label.new()
+		heading_label.text = heading
+		table.add_child(heading_label)
+	var rows: Array[Dictionary] = []
+	if _has_combat_overview:
+		for raw: Variant in _combat_overview.get("players", []):
+			if raw is Dictionary: rows.append(raw)
+		rows.sort_custom(func(a: Dictionary, b: Dictionary): return int(_overview_player(a).get("player_id", 0)) < int(_overview_player(b).get("player_id", 0)))
+	else:
+		var legacy: Dictionary = NetworkManager.local_combat_statistics
+		if not legacy.is_empty():
+			rows.append({"player_id": NetworkManager.local_player_id, "label": "我", "connected": true,
+				"kill_value": legacy.get("kill_value"), "death_value": legacy.get("death_value"),
+				"value_kd": legacy.get("value_kd"), "configured": legacy.get("configured", false),
+				"display_kd": legacy.get("display_kd", "未配置")})
+	if rows.is_empty():
+		var empty := Label.new()
+		empty.text = "等待服务器统计"
+		empty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		table.add_child(empty)
+		for _column: int in 4: table.add_child(Control.new())
+		return
+	var viewer_id := int(_combat_overview.get("viewer_player_id", NetworkManager.local_player_id)) if _has_combat_overview else NetworkManager.local_player_id
+	for row: Dictionary in rows:
+		var player := _overview_player(row)
+		var player_id := int(player.get("player_id", 0))
+		var name_label := Label.new()
+		name_label.text = str(row.get("label", "玩家 %d" % player_id)) + ("（我）" if player_id == viewer_id else "")
+		table.add_child(name_label)
+		for field: String in ["kill_value", "death_value"]:
+			var value_label := Label.new()
+			value_label.text = _combat_value_text(player.get(field))
+			table.add_child(value_label)
+		var kd_label := Label.new()
+		kd_label.text = _combat_kd_text(player)
+		table.add_child(kd_label)
+		var status := Label.new()
+		status.text = "在线" if bool(row.get("connected", true)) else "掉线"
+		table.add_child(status)
+
+
+func _combat_kd_text(player: Dictionary) -> String:
+	var display_kd: Variant = player.get("display_kd")
+	var kill_value: Variant = player.get("kill_value")
+	var death_value: Variant = player.get("death_value")
+	if display_kd != null and str(display_kd) == "未配置": return "未配置"
+	if kill_value == null or death_value == null: return "未配置"
+	if player.has("configured") and not bool(player.configured): return "未配置"
+	if float(death_value) == 0.0: return "无损"
+	if display_kd != null: return str(display_kd)
+	var value_kd: Variant = player.get("value_kd")
+	return str(value_kd) if value_kd != null else "未配置"
+
+
+func _overview_player(row: Dictionary) -> Dictionary:
+	var project_player: Variant = row.get("project_player", row)
+	return project_player if project_player is Dictionary else row
+
+
+func _viewer_combat_player() -> Dictionary:
+	if not _has_combat_overview: return {}
+	var viewer_id := int(_combat_overview.get("viewer_player_id", NetworkManager.local_player_id))
+	for raw: Variant in _combat_overview.get("players", []):
+		if not raw is Dictionary: continue
+		var player := _overview_player(raw)
+		if int(player.get("player_id", -1)) == viewer_id: return player
+	return {}
+
+
+func _refresh_combat_records() -> void:
+	var container := _menu.find_child("CombatRecords", true, false) as VBoxContainer
+	if container == null: return
+	for child: Node in container.get_children():
+		container.remove_child(child)
+		child.queue_free()
+	var viewer_id := int(_combat_overview.get("viewer_player_id", NetworkManager.local_player_id))
+	var records: Array[Dictionary] = []
+	if _has_combat_overview:
+		for raw: Variant in _combat_overview.get("records", []):
+			if raw is Dictionary:
+				var belongs := int(raw.get("killer_player_id", -1)) == viewer_id if _combat_records_tab == "kills" else int(raw.get("player_id", -1)) == viewer_id
+				if belongs: records.append(raw)
+	records.sort_custom(func(a: Dictionary, b: Dictionary):
+		if a.has("sequence") and b.has("sequence"): return int(a.sequence) > int(b.sequence)
+		return float(a.get("time_seconds", 0.0)) > float(b.get("time_seconds", 0.0)))
+	if records.is_empty():
+		var empty := Label.new()
+		empty.text = "暂无单位击杀记录" if _combat_records_tab == "kills" else "暂无单位被击杀记录"
+		container.add_child(empty)
+		return
+	for record: Dictionary in records:
+		var line := Label.new()
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var time_text := _combat_record_time(float(record.get("time_seconds", 0.0)))
+		var killer_id := int(record.get("killer_unit_id", 0))
+		var victim_id := int(record.get("unit_id", 0))
+		var killer_player := int(record.get("killer_player_id", 0))
+		var victim_player := int(record.get("player_id", 0))
+		var marker := "（自伤）" if killer_id == victim_id else ("（友伤）" if bool(record.get("friendly_fire", false)) else "")
+		line.text = "%s  来源：单位#%d·%s·%s → 被击杀：单位#%d·%s·%s  价值：%s%s" % [time_text, killer_id, _unit_kind_text(int(record.get("killer_unit_kind", -1))), _combat_player_label(killer_player), victim_id, _unit_kind_text(int(record.get("unit_kind", -1))), _combat_player_label(victim_player), _combat_value_text(record.get("value_points")), marker]
+		container.add_child(line)
+
+
+func _combat_record_time(seconds: float) -> String:
+	var elapsed := maxi(0, int(floor(seconds)))
+	return "%02d:%02d" % [elapsed / 60, elapsed % 60]
+
+
+func _combat_player_label(player_id: int) -> String:
+	if player_id <= 0: return "非玩家"
+	for raw: Variant in _combat_overview.get("players", []):
+		if not raw is Dictionary: continue
+		var player := _overview_player(raw)
+		if int(player.get("player_id", -1)) == player_id: return str(raw.get("label", "玩家 %d" % player_id))
+	return "未知玩家"
+
+
+func _unit_kind_text(unit_kind: int) -> String:
+	return "步兵" if unit_kind == UnitDefinition.UnitType.INFANTRY else ("装甲车辆" if unit_kind == UnitDefinition.UnitType.ARMORED_VEHICLE else "未知单位")
+
+
+func _on_combat_overview_received(overview: Dictionary) -> void:
+	_combat_overview = overview.duplicate(true)
+	_has_combat_overview = true
+	_refresh_combat_statistics()
+
+
+func _clear_combat_overview() -> void:
+	_combat_overview.clear()
+	_has_combat_overview = false
+	_refresh_combat_statistics()
+
+func _combat_value_text(value: Variant) -> String:
+	return "未配置" if value == null else str(value)
 
 func _confirm_fire(position: Vector2,append: bool = false) -> void:
 	_queue_action({"type":_fire_mode,"position":_ground_at(position),"append":append})
@@ -577,6 +909,10 @@ func _clear_selection() -> void:
 
 func _reset_replicated_units() -> void:
 	if not replay_mode: NetworkManager.local_task_queues.clear()
+	if _menu != null and _menu.visible: _close_menu()
+	elif _deployment_ui != null: _deployment_ui.set_process_input(true)
+	_clear_combat_overview()
+	_refresh_combat_statistics()
 	if _task_overlay != null:
 		_task_overlay.selection.clear()
 		_task_overlay.queues.clear()
@@ -632,9 +968,13 @@ func _on_unit_combat_state_received(unit_id: int, team_id: int, maximum_health: 
 	if _visual_units.has(unit_id):
 		_visual_units[unit_id].display_combat_state(team_id, maximum_health, health)
 		_unit_markers[unit_id].team_id = team_id
+		if not replay_mode:
+			_unit_markers[unit_id].apply_health(health,maximum_health)
 		_unit_markers[unit_id].refresh()
-		if not replay_mode and NetworkManager.acceptance_06c:
+		if not replay_mode and NetworkManager.acceptance_06c and "--acceptance-controls" in OS.get_cmdline_user_args():
 			_unit_markers[unit_id].tooltip_text = "TEST ONLY #%d team=%d HP=%.3f/%.3f" % [unit_id,team_id,health,maximum_health]
+		else:
+			_unit_markers[unit_id].tooltip_text = ""
 		_refresh_player_colors()
 
 
@@ -786,6 +1126,10 @@ func _on_visual_unit_removed(unit_id: int) -> void:
 	_hud_dirty = true
 	var focused := _selected_units.size() == 1 and _selected_units.has(unit_id)
 	_clear_unit_path(unit_id)
+	if _task_overlay != null:
+		_task_overlay.queues.erase(unit_id)
+		_task_overlay.selection.erase(unit_id)
+		_task_overlay.queue_redraw()
 	if _selected_units.has(unit_id) and is_instance_valid(_selected_units[unit_id]):
 		_selected_units[unit_id].set_selected(false)
 	_selected_units.erase(unit_id)
@@ -806,14 +1150,26 @@ func _handle_control_group_key(event: InputEventKey) -> bool:
 	if event.ctrl_pressed:
 		if event.shift_pressed: return false
 		_control_groups.save(group, _command_unit_ids(MovementSimulation.MoveMode.BASIC))
+		_hud_dirty = true
 		return true
+	_select_control_group(group, event.shift_pressed)
+	return true
+
+func _available_control_group_units() -> Array[int]:
 	var available: Array[int] = []
 	for id: int in _visual_units:
 		if _visual_units[id].owner_player_id == NetworkManager.local_player_id and NetworkManager.local_player_id > 0 and _visual_units[id].health > 0: available.append(id)
+	return available
+
+func _select_control_group(group: int, additive: bool) -> void:
+	if replay_mode or (_menu != null and _menu.visible) or (_deployment_ui != null and _deployment_ui.owns_commands()): return
+	if _camera.is_rotating() or not _fire_mode.is_empty() or _fast_move_armed or _attack_move_armed or _reverse_move_armed or _left_pressed or _right_pressed: return
+	var available := _available_control_group_units()
 	var current: Array[int] = []
 	current.assign(_selected_units.keys())
-	var result := _control_groups.select_group(group, current, available, event.shift_pressed, Time.get_ticks_msec()/1000.0)
-	if not result.changed: return true
+	var result := _control_groups.select_group(group, current, available, additive, Time.get_ticks_msec()/1000.0)
+	_hud_dirty = true
+	if not result.changed: return
 	var selection: Dictionary[int, Node3D] = {}
 	var center := Vector3.ZERO
 	for id: int in result.selection:
@@ -822,7 +1178,9 @@ func _handle_control_group_key(event: InputEventKey) -> bool:
 			center += _visual_units[id].position
 	_replace_selection(selection)
 	if result.locate and not selection.is_empty(): _camera.focus_position(center/selection.size())
-	return true
+
+func _on_hud_group(group: int, additive: bool) -> void:
+	_select_control_group(group, additive)
 
 func _hud_unit(id: int) -> Dictionary:
 	var unit: Node3D = _visual_units[id]
@@ -852,6 +1210,9 @@ func _refresh_hud() -> void:
 	var order := BattleHUDModel.selection_order(selected)
 	selected.sort_custom(func(a: Dictionary, b: Dictionary): return order.find(int(a.unit_id)) < order.find(int(b.unit_id)))
 	_battle_hud.show_selection(selected, presentation_source.live_structures, NetworkManager.local_player_id)
+	var current: Array[int] = []
+	current.assign(_selected_units.keys())
+	_battle_hud.show_control_groups(_control_groups.groups, current, _available_control_group_units())
 	_battle_hud.update_map(map_units, NetworkManager.local_player_id)
 
 func _on_hud_command(command: String) -> void:

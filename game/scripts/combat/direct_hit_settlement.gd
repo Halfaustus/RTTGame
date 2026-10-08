@@ -9,6 +9,7 @@ var records: Dictionary = {} # Server-only actual decisions retained for this ma
 var suppression_inputs: Array[Dictionary] = [] # Prepared C inputs; no Q mutation before D.
 var suppression_enabled := false
 var overpenetration_enabled := false
+var damage_committed: Callable # Optional match ledger; called at actual settlement time.
 
 func begin(aim: AimingSimulation,frame: FiringFrame) -> void:
 	aiming = aim
@@ -103,6 +104,8 @@ func apply_effect(input: Dictionary,plan: Dictionary) -> Dictionary:
 	results.append(result)
 	if plan.has("distance_squared"):
 		result.merge({"explosion_distance_squared":plan.distance_squared,"attenuation":plan.attenuation})
+	if damage_committed.is_valid() and damage_committed.call(result.duplicate(true)) != true:
+		return {"ok":false,"reason":"combat_outcome_commit_failed"}
 	return result
 
 static func vector(values: Array) -> Vector3:
